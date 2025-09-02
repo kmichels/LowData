@@ -3,7 +3,8 @@ import Foundation
 struct NetworkInfo {
     let interface: String
     let ssid: String?
-    let ipAddress: String?
+    let ipAddress: String?      // IPv4 address
+    let ipv6Address: String?    // IPv6 address
     let networkType: NetworkType
     let isConnected: Bool
     let wifiStandard: String?  // e.g., "Wi-Fi 6", "Wi-Fi 5"
@@ -41,6 +42,7 @@ struct NetworkInfo {
             interface: "",
             ssid: nil,
             ipAddress: nil,
+            ipv6Address: nil,
             networkType: .unknown,
             isConnected: false,
             wifiStandard: nil

@@ -36,26 +36,49 @@ class NetworkDetector: ObservableObject {
         
         let networkType = detectNetworkType(path: path)
         let interface = getActiveInterface()
-        let ssid = networkType == .wifi ? getWiFiSSID() : nil
-        let ipAddress = getIPAddress(for: interface)
-        let wifiStandard = networkType == .wifi ? getWiFiStandard() : nil
+        
+        // Check if both Ethernet and WiFi are connected
+        let hasEthernet = path.usesInterfaceType(.wiredEthernet)
+        let hasWifi = path.usesInterfaceType(.wifi)
+        
+        // Get WiFi info even if Ethernet is primary (for display purposes)
+        let ssid = (hasWifi) ? getWiFiSSID() : nil
+        let wifiStandard = (hasWifi) ? getWiFiStandard() : nil
+        
+        let (ipv4, ipv6) = getIPAddresses(for: interface)
+        
+        // If both connections exist, we might want to indicate this
+        var displayType = networkType
+        if hasEthernet && hasWifi && ssid != nil {
+            // We're using Ethernet but WiFi is also connected
+            // Keep networkType as ethernet but we'll show WiFi info too
+        }
         
         networkInfo = NetworkInfo(
             interface: interface ?? "Unknown",
             ssid: ssid,
-            ipAddress: ipAddress,
-            networkType: networkType,
+            ipAddress: ipv4,
+            ipv6Address: ipv6,
+            networkType: displayType,
             isConnected: true,
             wifiStandard: wifiStandard
         )
     }
     
     private func detectNetworkType(path: NWPath) -> NetworkInfo.NetworkType {
-        if path.usesInterfaceType(.wifi) {
-            return .wifi
-        } else if path.usesInterfaceType(.wiredEthernet) {
+        // Check what interfaces are being used
+        // Note: Both can be true if using both connections
+        let usesWifi = path.usesInterfaceType(.wifi)
+        let usesEthernet = path.usesInterfaceType(.wiredEthernet)
+        let usesCellular = path.usesInterfaceType(.cellular)
+        
+        // Priority: Ethernet > WiFi > Cellular
+        // This matches how macOS typically prioritizes connections
+        if usesEthernet {
             return .ethernet
-        } else if path.usesInterfaceType(.cellular) {
+        } else if usesWifi {
+            return .wifi
+        } else if usesCellular {
             return .cellular
         } else {
             return .unknown
@@ -143,12 +166,15 @@ class NetworkDetector: ObservableObject {
         }
     }
     
-    private func getIPAddress(for interface: String?) -> String? {
-        guard let interface = interface else { return nil }
+    private func getIPAddresses(for interface: String?) -> (ipv4: String?, ipv6: String?) {
+        guard let interface = interface else { return (nil, nil) }
         
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&ifaddr) == 0 else { return nil }
+        guard getifaddrs(&ifaddr) == 0 else { return (nil, nil) }
         defer { freeifaddrs(ifaddr) }
+        
+        var ipv4Address: String?
+        var ipv6Address: String?
         
         var ptr = ifaddr
         while ptr != nil {
@@ -170,14 +196,20 @@ class NetworkDetector: ObservableObject {
                                NI_NUMERICHOST)
                     
                     let address = String(cString: hostname)
+                    
                     if addrFamily == UInt8(AF_INET) && !address.isEmpty {
-                        return address
+                        ipv4Address = address
+                    } else if addrFamily == UInt8(AF_INET6) && !address.isEmpty {
+                        // Filter out link-local IPv6 addresses (fe80::)
+                        if !address.hasPrefix("fe80") {
+                            ipv6Address = address
+                        }
                     }
                 }
             }
         }
         
-        return nil
+        return (ipv4Address, ipv6Address)
     }
 }
 

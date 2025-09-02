@@ -107,7 +107,21 @@ class TrafficMonitor: ObservableObject {
             }
             
             // Sort by session total bytes (biggest users first)
-            processes = updatedProcesses.sorted { $0.sessionTotalBytes > $1.sessionTotalBytes }
+            // If session bytes are equal, sort by name for consistency
+            processes = updatedProcesses.sorted { 
+                if $0.sessionTotalBytes == $1.sessionTotalBytes {
+                    return $0.name < $1.name
+                }
+                return $0.sessionTotalBytes > $1.sessionTotalBytes
+            }
+            
+            // Debug: Print top 3 consumers
+            if processes.count > 0 {
+                print("Top data consumers this session:")
+                for (index, process) in processes.prefix(3).enumerated() {
+                    print("\(index + 1). \(process.name): \(process.formattedSessionTotal) (rate: \(process.formattedRate))")
+                }
+            }
             
             // Update totals
             totalBytesIn = processes.reduce(0) { $0 + $1.bytesIn }

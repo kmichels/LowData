@@ -119,8 +119,25 @@ struct HeaderView: View {
                 Image(systemName: networkInfo.networkType.iconName)
                     .foregroundColor(networkInfo.isConnected ? .blue : .gray)
                 
-                if let ssid = networkInfo.ssid, !ssid.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 2) {
+                    // Primary connection display
+                    if networkInfo.networkType == .ethernet {
+                        Text("Ethernet")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        // If WiFi is also connected, show it as secondary
+                        if let ssid = networkInfo.ssid {
+                            HStack(spacing: 4) {
+                                Text("WiFi: \(ssid)")
+                                if let standard = networkInfo.wifiStandard {
+                                    Text("(\(standard))")
+                                }
+                            }
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        }
+                    } else if let ssid = networkInfo.ssid, !ssid.isEmpty {
+                        // WiFi is primary
                         Text(ssid)
                             .font(.subheadline)
                             .fontWeight(.medium)
@@ -132,25 +149,28 @@ struct HeaderView: View {
                         }
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 2) {
+                    } else {
+                        // Fallback for other connection types
                         Text(networkInfo.networkType.rawValue)
                             .font(.subheadline)
-                        if let standard = networkInfo.wifiStandard {
-                            Text(standard)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
                     }
                 }
                 
-                if let ip = networkInfo.ipAddress {
+                if let ipv4 = networkInfo.ipAddress {
                     Text("•")
                         .foregroundColor(.secondary)
-                    Text(ip)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(ipv4)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        if let ipv6 = networkInfo.ipv6Address {
+                            Text(ipv6)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
                 }
                 
                 Spacer()
@@ -168,8 +188,8 @@ struct AppListView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(processes) { process in
-                    AppRowView(process: process)
+                ForEach(Array(processes.enumerated()), id: \.element.id) { index, process in
+                    AppRowView(process: process, rank: index + 1, isTopConsumer: index < 3)
                     if process.id != processes.last?.id {
                         Divider()
                             .padding(.leading, 60)
@@ -182,10 +202,30 @@ struct AppListView: View {
 
 struct AppRowView: View {
     let process: ProcessTraffic
+    let rank: Int
+    let isTopConsumer: Bool
     @State private var isHovered = false
     
     var body: some View {
         HStack(spacing: 12) {
+            // Rank indicator for top consumers
+            if isTopConsumer {
+                Text("\(rank)")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .frame(width: 20, height: 20)
+                    .background(
+                        Circle()
+                            .fill(rank == 1 ? Color.red : 
+                                  rank == 2 ? Color.orange : 
+                                  Color.yellow)
+                    )
+            } else {
+                Color.clear
+                    .frame(width: 20, height: 20)
+            }
+            
             // App icon
             if let icon = process.appIcon {
                 Image(nsImage: icon)
