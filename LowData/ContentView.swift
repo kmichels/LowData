@@ -6,78 +6,117 @@
 //
 
 import SwiftUI
-import CoreData
 
 struct ContentView: View {
-    @Environment(\.managedObjectContext) private var viewContext
-
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \Item.timestamp, ascending: true)],
-        animation: .default)
-    private var items: FetchedResults<Item>
-
+    @StateObject private var extensionManager = ExtensionManager()
+    @State private var lastUpdate = Date()
+    
     var body: some View {
-        NavigationView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp!, formatter: itemFormatter)")
-                    } label: {
-                        Text(item.timestamp!, formatter: itemFormatter)
+        VStack(spacing: 20) {
+            Text("Low Data Network Monitor")
+                .font(.largeTitle)
+                .padding(.top)
+            
+            // Status Section
+            GroupBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Circle()
+                            .fill(extensionManager.isFilterRunning ? Color.green : Color.red)
+                            .frame(width: 12, height: 12)
+                        Text(extensionManager.isFilterRunning ? "Filter Active" : "Filter Inactive")
+                            .font(.headline)
+                        Spacer()
+                    }
+                    
+                    HStack {
+                        Text("Status:")
+                            .foregroundColor(.secondary)
+                        Text(extensionManager.status)
+                        Spacer()
                     }
                 }
-                .onDelete(perform: deleteItems)
+                .padding(.vertical, 4)
+            } label: {
+                Label("Extension Status", systemImage: "shield")
             }
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
+            
+            // Statistics Section
+            GroupBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "network")
+                            .foregroundColor(.blue)
+                        Text("Flows Monitored:")
+                        Spacer()
+                        Text("\(extensionManager.flowCount)")
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundColor(.primary)
+                    }
+                    
+                    if !extensionManager.lastAppIdentifier.isEmpty {
+                        HStack {
+                            Image(systemName: "app")
+                                .foregroundColor(.blue)
+                            Text("Last App:")
+                            Spacer()
+                            Text(extensionManager.lastAppIdentifier.components(separatedBy: ".").last ?? extensionManager.lastAppIdentifier)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .font(.system(.body, design: .monospaced))
+                        }
                     }
                 }
+                .padding(.vertical, 4)
+            } label: {
+                Label("Network Activity", systemImage: "chart.line.uptrend.xyaxis")
             }
-            Text("Select an item")
-        }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(context: viewContext)
-            newItem.timestamp = Date()
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
+            
+            // Control Buttons
+            HStack(spacing: 20) {
+                Button(action: {
+                    extensionManager.installSystemExtension()
+                }) {
+                    Label("Install Extension", systemImage: "arrow.down.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(extensionManager.status == "Installed")
+                
+                Button(action: {
+                    Task {
+                        do {
+                            if extensionManager.isFilterRunning {
+                                try await extensionManager.deactivateFilter()
+                            } else {
+                                try await extensionManager.activateFilter()
+                            }
+                        } catch {
+                            print("Filter toggle failed: \(error)")
+                        }
+                    }
+                }) {
+                    Label(extensionManager.isFilterRunning ? "Stop Filter" : "Start Filter", 
+                          systemImage: extensionManager.isFilterRunning ? "stop.circle" : "play.circle")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!extensionManager.status.contains("Installed"))
             }
+            
+            Spacer()
+            
+            // Footer info
+            Text("Monitor network connections in real-time")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.bottom)
         }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            offsets.map { items[$0] }.forEach(viewContext.delete)
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
-        }
+        .padding()
+        .frame(minWidth: 500, minHeight: 400)
     }
 }
 
-private let itemFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateStyle = .short
-    formatter.timeStyle = .medium
-    return formatter
-}()
-
 #Preview {
-    ContentView().environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+    ContentView()
 }
