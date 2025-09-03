@@ -48,7 +48,7 @@ class NetworkDetector: ObservableObject {
         let (ipv4, ipv6) = getIPAddresses(for: interface)
         
         // If both connections exist, we might want to indicate this
-        var displayType = networkType
+        let displayType = networkType
         if hasEthernet && hasWifi && ssid != nil {
             // We're using Ethernet but WiFi is also connected
             // Keep networkType as ethernet but we'll show WiFi info too

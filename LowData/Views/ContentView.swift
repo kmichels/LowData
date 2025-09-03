@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var trafficMonitor = TrafficMonitor()
-    @StateObject private var networkDetector = NetworkDetector()
+    @EnvironmentObject var trafficMonitor: TrafficMonitor
+    @EnvironmentObject var networkDetector: NetworkDetector
     
     var body: some View {
         VStack(spacing: 0) {
@@ -296,9 +296,62 @@ struct EmptyStateView: View {
 struct FooterView: View {
     @ObservedObject var trafficMonitor: TrafficMonitor
     let isMonitoring: Bool
+    @Environment(\.openSettings) private var openSettings
+    @AppStorage("runInMenuBar") private var runInMenuBar = false
     
     var body: some View {
         HStack {
+            // Settings button
+            Button(action: {
+                // Check if we're in a popover (menubar mode)
+                if let window = NSApp.windows.first(where: { $0.className.contains("NSPopoverWindow") }),
+                   window.isVisible {
+                    // We're in a popover, show a tooltip instead
+                    print("Right-click the menubar icon for preferences")
+                } else {
+                    // Normal window mode
+                    if #available(macOS 14, *) {
+                        openSettings()
+                    } else {
+                        // For older macOS versions, trigger the menu item
+                        if let appMenu = NSApp.mainMenu?.items.first?.submenu {
+                            for item in appMenu.items {
+                                if item.title.contains("Settings") || item.title.contains("Preferences") {
+                                    NSApp.sendAction(item.action!, to: item.target, from: nil)
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+            }) {
+                Image(systemName: "gear")
+            }
+            .buttonStyle(.plain)
+            .help("Preferences")
+            
+            // Mode toggle button
+            Button(action: {
+                // Check if we're in a popover
+                let inPopover = NSApp.windows.contains { $0.className.contains("NSPopoverWindow") && $0.isVisible }
+                
+                if inPopover && runInMenuBar {
+                    // We're in menubar mode popover, close it before switching
+                    for window in NSApp.windows {
+                        if window.className.contains("NSPopoverWindow") {
+                            window.close()
+                        }
+                    }
+                }
+                
+                // Toggle the mode - this will trigger onChange in LowDataApp
+                runInMenuBar.toggle()
+            }) {
+                Image(systemName: runInMenuBar ? "menubar.dock.rectangle" : "menubar.rectangle")
+            }
+            .buttonStyle(.plain)
+            .help(runInMenuBar ? "Switch to Dock mode" : "Switch to Menu Bar mode")
+            
             if let error = trafficMonitor.lastError {
                 Text(error)
                     .font(.caption)
@@ -330,4 +383,6 @@ struct FooterView: View {
 
 #Preview {
     ContentView()
+        .environmentObject(TrafficMonitor())
+        .environmentObject(NetworkDetector())
 }
