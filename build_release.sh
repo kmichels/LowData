@@ -23,14 +23,13 @@ if [ ! -f "build/$HELPER_NAME" ]; then
     ./build_helper.sh
 fi
 
-# Build the app with Release configuration
-echo "Building app with xcodebuild..."
+# Build the app WITHOUT signing first
+echo "Building app with xcodebuild (no signing)..."
 xcodebuild -scheme "$APP_NAME" \
     -configuration Release \
     -derivedDataPath "$BUILD_DIR/DerivedData" \
-    CODE_SIGN_IDENTITY="$DEVELOPER_ID" \
-    CODE_SIGN_STYLE="Manual" \
-    DEVELOPMENT_TEAM="85QL287QYW" \
+    CODE_SIGN_IDENTITY="" \
+    CODE_SIGNING_REQUIRED=NO \
     build
 
 # Find the built app
@@ -40,6 +39,10 @@ if [ ! -d "$APP_PATH" ]; then
     echo "Error: App not found at $APP_PATH"
     exit 1
 fi
+
+# Copy release Info.plist
+echo "Updating Info.plist for release..."
+cp "LowData/Info-Release.plist" "$APP_PATH/Contents/Info.plist"
 
 # Copy helper to app bundle's Library/LaunchServices
 echo "Embedding helper tool..."
@@ -52,7 +55,7 @@ echo "Signing app bundle with Developer ID..."
 codesign --force \
     --deep \
     --sign "$DEVELOPER_ID" \
-    --entitlements "LowData/LowData.entitlements" \
+    --entitlements "LowData/LowData-Release.entitlements" \
     --options runtime \
     --timestamp \
     "$APP_PATH"
