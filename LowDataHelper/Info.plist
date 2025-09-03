@@ -12,7 +12,7 @@
 	<string>1.0.0</string>
 	<key>SMAuthorizedClients</key>
 	<array>
-		<string>identifier "com.lowdata.LowData" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = "YOUR_TEAM_ID"</string>
+		<string>identifier "com.tonalphoto.tech.LowData" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = "85QL287QYW"</string>
 	</array>
 </dict>
 </plist>
