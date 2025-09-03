@@ -3,10 +3,16 @@ import SwiftUI
 struct PreferencesView: View {
     @Binding var runInMenuBar: Bool
     @EnvironmentObject var trafficMonitor: TrafficMonitor
+    @ObservedObject var profileManager: NetworkProfileManager
     @AppStorage("updateInterval") private var updateInterval: Double = 2.0
     @AppStorage("displayUnits") private var displayUnits: String = "bits"
     @AppStorage("showSystemProcesses") private var showSystemProcesses = false
     @AppStorage("darkModeSupport") private var darkModeSupport = true
+    
+    init(runInMenuBar: Binding<Bool>, profileManager: NetworkProfileManager) {
+        self._runInMenuBar = runInMenuBar
+        self.profileManager = profileManager
+    }
     
     var body: some View {
         TabView {
@@ -24,12 +30,17 @@ struct PreferencesView: View {
                 Label("Monitoring", systemImage: "network")
             }
             
+            TravelModeView(profileManager: profileManager)
+                .tabItem {
+                    Label("Travel Mode", systemImage: "lock.shield")
+                }
+            
             AppearanceTab(darkModeSupport: $darkModeSupport)
                 .tabItem {
                     Label("Appearance", systemImage: "paintbrush")
             }
         }
-        .frame(width: 450, height: 300)
+        .frame(width: 450, height: 400)
     }
 }
 
@@ -164,6 +175,6 @@ struct AppearanceTab: View {
 }
 
 #Preview {
-    PreferencesView(runInMenuBar: .constant(false))
+    PreferencesView(runInMenuBar: .constant(false), profileManager: NetworkProfileManager())
         .environmentObject(TrafficMonitor())
 }

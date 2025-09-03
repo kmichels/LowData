@@ -8,7 +8,8 @@ struct ContentView: View {
         VStack(spacing: 0) {
             HeaderView(
                 networkInfo: networkDetector.networkInfo,
-                trafficMonitor: trafficMonitor
+                trafficMonitor: trafficMonitor,
+                profileManager: networkDetector.profileManager
             )
             
             Divider()
@@ -23,6 +24,7 @@ struct ContentView: View {
             
             FooterView(
                 trafficMonitor: trafficMonitor,
+                profileManager: networkDetector.profileManager,
                 isMonitoring: trafficMonitor.isMonitoring
             )
         }
@@ -33,6 +35,7 @@ struct ContentView: View {
 struct HeaderView: View {
     let networkInfo: NetworkInfo
     @ObservedObject var trafficMonitor: TrafficMonitor
+    @ObservedObject var profileManager: NetworkProfileManager
     
     private func formatSessionBits(_ bytes: Int64) -> String {
         if bytes == 0 {
@@ -118,6 +121,14 @@ struct HeaderView: View {
             HStack {
                 Image(systemName: networkInfo.networkType.iconName)
                     .foregroundColor(networkInfo.isConnected ? .blue : .gray)
+                
+                // Travel Mode indicator
+                if profileManager.isTravelMode {
+                    Image(systemName: "lock.shield.fill")
+                        .foregroundColor(.orange)
+                        .font(.footnote)
+                        .help("Travel Mode is active - SMB ports are blocked")
+                }
                 
                 VStack(alignment: .leading, spacing: 2) {
                     // Primary connection display
@@ -295,6 +306,7 @@ struct EmptyStateView: View {
 
 struct FooterView: View {
     @ObservedObject var trafficMonitor: TrafficMonitor
+    @ObservedObject var profileManager: NetworkProfileManager
     let isMonitoring: Bool
     @Environment(\.openSettings) private var openSettings
     @AppStorage("runInMenuBar") private var runInMenuBar = false
@@ -351,6 +363,29 @@ struct FooterView: View {
             }
             .buttonStyle(.plain)
             .help(runInMenuBar ? "Switch to Dock mode" : "Switch to Menu Bar mode")
+            
+            // Travel Mode toggle
+            Divider()
+                .frame(height: 20)
+            
+            HStack(spacing: 6) {
+                Image(systemName: "lock.shield.fill")
+                    .foregroundColor(profileManager.isTravelMode ? .orange : .secondary)
+                    .font(.system(size: 12))
+                
+                Text("Travel Mode")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                
+                Toggle("", isOn: Binding(
+                    get: { profileManager.isTravelMode },
+                    set: { _ in profileManager.toggleTravelMode() }
+                ))
+                .toggleStyle(.switch)
+                .scaleEffect(0.7)
+                .labelsHidden()
+            }
+            .help(profileManager.isTravelMode ? "Travel Mode is ON - SMB ports are blocked" : "Travel Mode is OFF - Normal network access")
             
             if let error = trafficMonitor.lastError {
                 Text(error)

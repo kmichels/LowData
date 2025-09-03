@@ -6,6 +6,7 @@ import SystemConfiguration
 @MainActor
 class NetworkDetector: ObservableObject {
     @Published var networkInfo: NetworkInfo = .disconnected
+    @Published var profileManager = NetworkProfileManager()
     
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "NetworkMonitor")
@@ -63,6 +64,9 @@ class NetworkDetector: ObservableObject {
             isConnected: true,
             wifiStandard: wifiStandard
         )
+        
+        // Notify profile manager about current network
+        profileManager.detectCurrentNetwork(ssid: ssid)
     }
     
     private func detectNetworkType(path: NWPath) -> NetworkInfo.NetworkType {

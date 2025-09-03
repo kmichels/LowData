@@ -53,7 +53,7 @@ struct LowDataApp: App {
         }
         
         Settings {
-            PreferencesView(runInMenuBar: $runInMenuBar)
+            PreferencesView(runInMenuBar: $runInMenuBar, profileManager: networkDetector.profileManager)
                 .environmentObject(trafficMonitor)
                 .onChange(of: runInMenuBar) { _, newValue in
                     toggleMenuBarMode(newValue)
