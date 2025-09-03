@@ -54,6 +54,8 @@ struct BlockingRulesView: View {
 
 struct BlockingRulesHeader: View {
     @ObservedObject var rulesManager: BlockingRulesManager
+    @State private var showInstallAlert = false
+    @State private var installError: String?
     
     var body: some View {
         VStack(spacing: 12) {
@@ -69,8 +71,20 @@ struct BlockingRulesHeader: View {
                 
                 Spacer()
                 
+                // Helper installation status
+                if !rulesManager.helperToolManager.isHelperInstalled {
+                    Button(action: {
+                        showInstallAlert = true
+                    }) {
+                        Label("Install Helper", systemImage: "arrow.down.circle")
+                            .foregroundColor(.orange)
+                    }
+                    .buttonStyle(.plain)
+                }
+                
                 Toggle("Enable Blocking", isOn: $rulesManager.isBlockingEnabled)
                     .toggleStyle(.switch)
+                    .disabled(!rulesManager.helperToolManager.isHelperInstalled)
                     .onChange(of: rulesManager.isBlockingEnabled) { _, _ in
                         rulesManager.saveEnabledState()
                         rulesManager.applyRules()
@@ -78,7 +92,22 @@ struct BlockingRulesHeader: View {
             }
             .padding()
             
-            if rulesManager.isBlockingEnabled && rulesManager.enabledRulesCount > 0 {
+            // Show helper status
+            if !rulesManager.helperToolManager.isHelperInstalled {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.orange)
+                        .font(.caption)
+                    
+                    Text("Privileged helper not installed. Click 'Install Helper' to enable blocking.")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                    
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+            } else if rulesManager.isBlockingEnabled && rulesManager.enabledRulesCount > 0 {
                 HStack(spacing: 8) {
                     Image(systemName: "info.circle")
                         .foregroundColor(.blue)
@@ -93,8 +122,46 @@ struct BlockingRulesHeader: View {
                 .padding(.horizontal)
                 .padding(.bottom, 8)
             }
+            
+            // Show any errors
+            if let error = rulesManager.lastError {
+                HStack(spacing: 8) {
+                    Image(systemName: "xmark.circle")
+                        .foregroundColor(.red)
+                        .font(.caption)
+                    
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                    
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+            }
         }
         .background(Color(NSColor.controlBackgroundColor))
+        .alert("Install Privileged Helper", isPresented: $showInstallAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Install") {
+                rulesManager.installHelper { success, error in
+                    if !success {
+                        installError = error
+                    }
+                }
+            }
+        } message: {
+            Text("The privileged helper tool is required to apply network blocking rules. You will be prompted for your administrator password.")
+        }
+        .alert("Installation Failed", isPresented: .constant(installError != nil)) {
+            Button("OK") {
+                installError = nil
+            }
+        } message: {
+            if let error = installError {
+                Text(error)
+            }
+        }
     }
 }
 

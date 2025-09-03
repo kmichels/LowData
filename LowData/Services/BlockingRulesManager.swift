@@ -5,6 +5,8 @@ import SwiftUI
 class BlockingRulesManager: ObservableObject {
     @Published var rules: [BlockingRule] = []
     @Published var isBlockingEnabled: Bool = true
+    @Published var helperToolManager = HelperToolManager()
+    @Published var lastError: String?
     
     private let rulesKey = "blockingRules"
     private let enabledKey = "blockingEnabled"
@@ -126,20 +128,66 @@ class BlockingRulesManager: ObservableObject {
             return
         }
         
+        // Check if helper is installed
+        guard helperToolManager.isHelperInstalled else {
+            print("Helper tool not installed - rules not applied")
+            lastError = "Privileged helper not installed. Install it from Blocking Rules preferences."
+            return
+        }
+        
         // Get enabled rules
         let enabledRules = rules.filter { $0.isEnabled }
         
-        // TODO: Communicate with privileged helper to apply pfctl rules
-        print("Applying \(enabledRules.count) blocking rules")
+        print("Applying \(enabledRules.count) blocking rules via helper")
         
-        for rule in enabledRules {
-            print("  - \(rule.name): \(rule.type.displayName)")
+        // Apply rules via helper tool
+        helperToolManager.applyRules(enabledRules) { [weak self] success, error in
+            Task { @MainActor in
+                if success {
+                    self?.lastError = nil
+                    print("Successfully applied blocking rules")
+                } else {
+                    self?.lastError = error
+                    print("Failed to apply rules: \(error ?? "Unknown error")")
+                }
+            }
         }
     }
     
     func removeAllActiveRules() {
-        // TODO: Communicate with privileged helper to remove all pfctl rules
-        print("Removing all blocking rules")
+        guard helperToolManager.isHelperInstalled else {
+            print("Helper tool not installed - no rules to remove")
+            return
+        }
+        
+        print("Removing all blocking rules via helper")
+        
+        helperToolManager.removeAllRules { [weak self] success, error in
+            Task { @MainActor in
+                if success {
+                    self?.lastError = nil
+                    print("Successfully removed all blocking rules")
+                } else {
+                    self?.lastError = error
+                    print("Failed to remove rules: \(error ?? "Unknown error")")
+                }
+            }
+        }
+    }
+    
+    func installHelper(completion: @escaping (Bool, String?) -> Void) {
+        helperToolManager.installHelper { [weak self] success, error in
+            Task { @MainActor in
+                if success {
+                    self?.lastError = nil
+                    // Apply rules after successful installation
+                    self?.applyRules()
+                } else {
+                    self?.lastError = error
+                }
+                completion(success, error)
+            }
+        }
     }
     
     // MARK: - Travel Mode Integration
