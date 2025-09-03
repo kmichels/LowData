@@ -25,6 +25,7 @@ class NetworkProfileManager: ObservableObject {
     @Published var profiles: [NetworkProfile] = []
     @Published var currentProfile: NetworkProfile?
     @Published var isTravelMode: Bool = false
+    @Published var blockingRulesManager = BlockingRulesManager()
     
     private let userDefaults = UserDefaults.standard
     private let profilesKey = "networkProfiles"
@@ -183,13 +184,13 @@ class NetworkProfileManager: ObservableObject {
         }
         saveTravelMode()
         
-        // Apply or remove SMB blocks based on travel mode
+        // Notify BlockingRulesManager of Travel Mode change
+        blockingRulesManager.handleTravelModeChange(isActive: isTravelMode)
+        
         if isTravelMode {
-            print("Travel Mode ACTIVE - Blocking SMB ports")
-            applySMBBlocks()
+            print("Travel Mode ACTIVE - Applying blocking rules")
         } else {
             print("Travel Mode INACTIVE - On trusted network")
-            removeSMBBlocks()
         }
     }
     
@@ -197,26 +198,7 @@ class NetworkProfileManager: ObservableObject {
         isTravelMode.toggle()
         saveTravelMode()
         
-        if isTravelMode {
-            applySMBBlocks()
-        } else {
-            removeSMBBlocks()
-        }
-    }
-    
-    // MARK: - SMB Blocking
-    
-    private func applySMBBlocks() {
-        // This will use pfctl to block SMB ports
-        // For now, just log the action
-        print("Would block SMB ports: 445, 139")
-        // TODO: Implement actual pfctl commands with privileged helper
-    }
-    
-    private func removeSMBBlocks() {
-        // This will use pfctl to unblock SMB ports
-        // For now, just log the action
-        print("Would unblock SMB ports: 445, 139")
-        // TODO: Implement actual pfctl commands with privileged helper
+        // Notify BlockingRulesManager of Travel Mode change
+        blockingRulesManager.handleTravelModeChange(isActive: isTravelMode)
     }
 }

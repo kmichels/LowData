@@ -35,6 +35,11 @@ struct PreferencesView: View {
                     Label("Travel Mode", systemImage: "lock.shield")
                 }
             
+            BlockingRulesView(rulesManager: profileManager.blockingRulesManager)
+                .tabItem {
+                    Label("Blocking Rules", systemImage: "shield.slash")
+                }
+            
             AppearanceTab(darkModeSupport: $darkModeSupport)
                 .tabItem {
                     Label("Appearance", systemImage: "paintbrush")
