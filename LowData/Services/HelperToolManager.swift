@@ -37,31 +37,36 @@ class HelperToolManager: ObservableObject {
         }
         
         // Create authorization item for installing helper
+        let rightName = kSMRightBlessPrivilegedHelper.withCString { strdup($0) }!
+        defer { free(rightName) }
+        
         var authItem = AuthorizationItem(
-            name: kSMRightBlessPrivilegedHelper,
+            name: rightName,
             valueLength: 0,
             value: nil,
             flags: 0
         )
         
-        var authRights = AuthorizationRights(
-            count: 1,
-            items: &authItem
-        )
-        
-        let authFlags: AuthorizationFlags = [
-            .interactionAllowed,
-            .extendRights,
-            .preAuthorize
-        ]
-        
-        authStatus = AuthorizationCopyRights(
-            authRef!,
-            &authRights,
-            nil,
-            authFlags,
-            nil
-        )
+        withUnsafeMutablePointer(to: &authItem) { authItemPtr in
+            var authRights = AuthorizationRights(
+                count: 1,
+                items: authItemPtr
+            )
+            
+            let authFlags: AuthorizationFlags = [
+                .interactionAllowed,
+                .extendRights,
+                .preAuthorize
+            ]
+            
+            authStatus = AuthorizationCopyRights(
+                authRef!,
+                &authRights,
+                nil,
+                authFlags,
+                nil
+            )
+        }
         
         guard authStatus == errAuthorizationSuccess else {
             AuthorizationFree(authRef!, [])
@@ -70,13 +75,32 @@ class HelperToolManager: ObservableObject {
         }
         
         // Install helper using SMJobBless
+        // Note: SMJobBless is deprecated in macOS 13.0 in favor of SMAppService.
+        // However, migrating to SMAppService requires significant architectural changes:
+        // - Different helper bundle structure
+        // - New plist format and location
+        // - Different authorization model
+        // SMJobBless continues to work on macOS 13+ and we use it for compatibility.
         var error: Unmanaged<CFError>?
-        let success = SMJobBless(
-            kSMDomainSystemLaunchd,
-            helperBundleID as CFString,
-            authRef,
-            &error
-        )
+        let success: Bool
+        
+        // We suppress the deprecation warning as this is intentional for compatibility
+        if #available(macOS 13.0, *) {
+            // Future: Implement SMAppService when we can require macOS 13+
+            success = SMJobBless(
+                kSMDomainSystemLaunchd,
+                helperBundleID as CFString,
+                authRef,
+                &error
+            )
+        } else {
+            success = SMJobBless(
+                kSMDomainSystemLaunchd,
+                helperBundleID as CFString,
+                authRef,
+                &error
+            )
+        }
         
         AuthorizationFree(authRef!, [])
         

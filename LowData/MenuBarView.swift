@@ -9,6 +9,7 @@ class MenuBarController: NSObject {
     private var networkDetector: NetworkDetector
     private var eventMonitor: Any?
     private var onModeChange: ((Bool) -> Void)?
+    @AppStorage("menuBarIconStyle") private var menuBarIconStyle = "emoji" // "emoji" or "sfSymbol"
     
     init(monitor: TrafficMonitor, networkDetector: NetworkDetector, onModeChange: @escaping (Bool) -> Void) {
         self.monitor = monitor
@@ -80,13 +81,36 @@ class MenuBarController: NSObject {
             guard let self = self,
                   let button = self.statusItem?.button else { return }
             
-            if self.monitor.isMonitoring {
-                let rate = self.formatRate(self.monitor.totalRate)
-                button.title = "📊 \(rate)"
-                button.toolTip = "Low Data - Click to view details"
+            if self.menuBarIconStyle == "sfSymbol" {
+                // Use SF Symbol
+                if let image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "Low Data") {
+                    // Configure the image
+                    let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular, scale: .medium)
+                    let configuredImage = image.withSymbolConfiguration(config)
+                    
+                    button.image = configuredImage
+                    button.imagePosition = .imageLeft
+                    
+                    if self.monitor.isMonitoring {
+                        let rate = self.formatRate(self.monitor.totalRate)
+                        button.title = " \(rate)"
+                        button.toolTip = "Low Data - Click to view details"
+                    } else {
+                        button.title = ""
+                        button.toolTip = "Low Data - Not monitoring"
+                    }
+                }
             } else {
-                button.title = "📊"
-                button.toolTip = "Low Data - Not monitoring"
+                // Use emoji (default)
+                button.image = nil
+                if self.monitor.isMonitoring {
+                    let rate = self.formatRate(self.monitor.totalRate)
+                    button.title = "📊 \(rate)"
+                    button.toolTip = "Low Data - Click to view details"
+                } else {
+                    button.title = "📊"
+                    button.toolTip = "Low Data - Not monitoring"
+                }
             }
         }
     }

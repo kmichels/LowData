@@ -3,13 +3,23 @@ import Network
 
 // Network profile that stores network characteristics
 struct NetworkProfile: Codable, Identifiable, Equatable {
-    let id = UUID()
+    let id: UUID
     let ssid: String?
     let bssid: String?  // MAC address of router for more specific identification
     let name: String
     let isTrusted: Bool
     let dateAdded: Date
     let lastSeen: Date
+    
+    init(id: UUID = UUID(), ssid: String?, bssid: String?, name: String, isTrusted: Bool, dateAdded: Date = Date(), lastSeen: Date = Date()) {
+        self.id = id
+        self.ssid = ssid
+        self.bssid = bssid
+        self.name = name
+        self.isTrusted = isTrusted
+        self.dateAdded = dateAdded
+        self.lastSeen = lastSeen
+    }
     
     // Create a key for identifying unique networks
     var networkKey: String {
