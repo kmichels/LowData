@@ -6,7 +6,7 @@
     <string>com.lowdata.helper</string>
     
     <key>BundleProgram</key>
-    <string>com.lowdata.helper.xpc</string>
+    <string>Contents/Library/LaunchDaemons/com.lowdata.helper.xpc</string>
     
     <key>MachServices</key>
     <dict>

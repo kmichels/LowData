@@ -55,6 +55,7 @@ struct BlockingRulesView: View {
 struct BlockingRulesHeader: View {
     @ObservedObject var rulesManager: BlockingRulesManager
     @State private var showInstallAlert = false
+    @State private var showUninstallAlert = false
     @State private var installError: String?
     
     var body: some View {
@@ -78,6 +79,15 @@ struct BlockingRulesHeader: View {
                     }) {
                         Label("Install Helper", systemImage: "arrow.down.circle")
                             .foregroundColor(.orange)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    // Add uninstall button when helper is installed
+                    Button(action: {
+                        showUninstallAlert = true
+                    }) {
+                        Label("Uninstall Helper", systemImage: "trash.circle")
+                            .foregroundColor(.red)
                     }
                     .buttonStyle(.plain)
                 }
@@ -161,6 +171,21 @@ struct BlockingRulesHeader: View {
             if let error = installError {
                 Text(error)
             }
+        }
+        .alert("Uninstall Privileged Helper", isPresented: $showUninstallAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Uninstall", role: .destructive) {
+                rulesManager.helperToolManager.uninstallHelper { success, error in
+                    if !success {
+                        installError = error
+                    } else {
+                        // Force re-check of helper status after uninstall
+                        rulesManager.helperToolManager.checkHelperStatus()
+                    }
+                }
+            }
+        } message: {
+            Text("This will remove the privileged helper tool and disable all blocking rules.")
         }
     }
 }

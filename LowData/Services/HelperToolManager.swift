@@ -16,7 +16,11 @@ class HelperToolManager: ObservableObject {
     // MARK: - Initialization
     init() {
         setupDaemonService()
-        checkHelperStatus()
+        
+        // Check status asynchronously to avoid blocking UI
+        Task { @MainActor in
+            checkHelperStatus()
+        }
         
         // Periodically check helper status to stay in sync
         Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
@@ -27,10 +31,10 @@ class HelperToolManager: ObservableObject {
     }
     
     private func setupDaemonService() {
-        // SMAppService requires just the plist filename without path
+        // SMAppService requires the plist filename WITH the .plist extension
         // The plist must be in Contents/Library/LaunchDaemons/
-        // Use just the filename without the .plist extension
-        daemonService = SMAppService.daemon(plistName: "com.lowdata.helper")
+        // ChatGPT research confirms: include .plist extension in the name
+        daemonService = SMAppService.daemon(plistName: "com.lowdata.helper.plist")
     }
     
     // MARK: - Helper Installation using SMAppService
@@ -122,10 +126,15 @@ class HelperToolManager: ObservableObject {
         case .enabled:
             // Helper is registered and enabled
             print("HelperToolManager: Helper is enabled")
+            
+            // For now, assume it's installed if registered
+            // Then verify connection async without blocking
             isHelperInstalled = true
             
-            // Try to connect and get version
-            verifyHelperConnection()
+            // Check connection in background
+            Task {
+                await checkHelperProcessAsync()
+            }
             
         case .requiresApproval:
             // User needs to approve in System Settings
@@ -152,11 +161,96 @@ class HelperToolManager: ObservableObject {
         }
     }
     
+    private func checkHelperProcessAsync() async {
+        print("HelperToolManager: Checking helper process async...")
+        
+        // Don't block on process checking - just verify with XPC connection
+        // The XPC connection attempt will tell us if the helper is actually running
+        await withCheckedContinuation { continuation in
+            verifyHelperConnectionWithTimeout { [weak self] success in
+                Task { @MainActor in
+                    if !success {
+                        self?.helperVersion = nil
+                        self?.installationError = "Helper registered but not responding"
+                        print("HelperToolManager: Helper not responding to XPC")
+                    } else {
+                        self?.installationError = nil
+                        print("HelperToolManager: Helper is responding to XPC")
+                    }
+                }
+                continuation.resume()
+            }
+        }
+    }
+    
+    private func helperProcessIsRunning() -> Bool {
+        // Check if the helper process is actually running
+        let task = Process()
+        task.launchPath = "/bin/ps"
+        task.arguments = ["aux"]
+        
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8) {
+                return output.contains("com.lowdata.helper")
+            }
+        } catch {
+            print("HelperToolManager: Failed to check process status: \(error)")
+        }
+        
+        return false
+    }
+    
+    private func verifyHelperConnectionWithTimeout(completion: @escaping (Bool) -> Void) {
+        print("HelperToolManager: Attempting to verify helper connection...")
+        
+        let connection = NSXPCConnection(machServiceName: helperBundleID, options: .privileged)
+        connection.remoteObjectInterface = NSXPCInterface(with: LowDataHelperProtocol.self)
+        connection.resume()
+        
+        var responded = false
+        
+        let helper = connection.remoteObjectProxyWithErrorHandler { error in
+            print("HelperToolManager: Connection failed: \(error.localizedDescription)")
+            if !responded {
+                responded = true
+                completion(false)
+            }
+        } as? LowDataHelperProtocol
+        
+        helper?.getHelperVersion { version in
+            print("HelperToolManager: Helper responded with version: \(version)")
+            if !responded {
+                responded = true
+                Task { @MainActor in
+                    self.helperVersion = version
+                    completion(true)
+                }
+            }
+        }
+        
+        // Timeout after 2 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            connection.invalidate()
+            if !responded {
+                responded = true
+                print("HelperToolManager: Connection timed out")
+                completion(false)
+            }
+        }
+    }
+    
     private func verifyHelperConnection() {
         print("HelperToolManager: Verifying helper connection...")
         
         // Try to connect to the helper via XPC
-        let connection = NSXPCConnection(machServiceName: helperBundleID)
+        let connection = NSXPCConnection(machServiceName: helperBundleID, options: .privileged)
         connection.remoteObjectInterface = NSXPCInterface(with: LowDataHelperProtocol.self)
         connection.resume()
         
@@ -192,7 +286,7 @@ class HelperToolManager: ObservableObject {
             return connection
         }
         
-        let connection = NSXPCConnection(machServiceName: helperBundleID)
+        let connection = NSXPCConnection(machServiceName: helperBundleID, options: .privileged)
         connection.remoteObjectInterface = NSXPCInterface(with: LowDataHelperProtocol.self)
         
         connection.invalidationHandler = { [weak self] in
