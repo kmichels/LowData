@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.tonalphoto.tech.LowData</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Low Data needs to run system commands to monitor network usage.</string>
 </dict>

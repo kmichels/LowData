@@ -188,28 +188,14 @@ class MenuBarController: NSObject {
             closePopover()
         }
         
-        // Activate the app first to ensure menu bar is available
+        // Activate the app first
         NSApp.activate(ignoringOtherApps: true)
         
-        // Use the Settings menu item directly
-        Task { @MainActor in
-            // Small delay to ensure activation completes
-            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
-            
-            // Try to open Settings using the menu item
-            if let appMenu = NSApp.mainMenu?.items.first?.submenu {
-                for item in appMenu.items {
-                    if item.title.contains("Settings") || item.title.contains("Preferences") {
-                        NSApp.sendAction(item.action!, to: item.target, from: nil)
-                        return
-                    }
-                }
-            }
-            
-            // Fallback - open settings window directly
-            if let settingsWindow = NSApp.windows.first(where: { $0.title.contains("Settings") || $0.title.contains("Preferences") }) {
-                settingsWindow.makeKeyAndOrderFront(nil)
-            }
+        // Open Settings window using the official API for macOS 14+
+        if #available(macOS 13, *) {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        } else {
+            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
         }
     }
     

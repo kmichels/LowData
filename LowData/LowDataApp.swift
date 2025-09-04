@@ -94,12 +94,8 @@ struct LowDataApp: App {
             }
             
             CommandGroup(replacing: .appSettings) {
-                Button("Preferences...") {
-                    if #available(macOS 13, *) {
-                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                    } else {
-                        NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-                    }
+                SettingsLink {
+                    Text("Settings...")
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }

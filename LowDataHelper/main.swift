@@ -1,7 +1,7 @@
 import Foundation
 
-// LowData Privileged Helper Tool
-// Handles pfctl commands for blocking network traffic
+// LowData Privileged Helper Tool for macOS 15+
+// Uses SMAppService for modern daemon management
 
 class LowDataHelper: NSObject {
     
@@ -15,11 +15,18 @@ class LowDataHelper: NSObject {
     }
     
     func run() {
+        // Log startup with more details
+        NSLog("LowDataHelper: Starting helper daemon (SMAppService version)")
+        NSLog("LowDataHelper: Process ID: \(ProcessInfo.processInfo.processIdentifier)")
+        NSLog("LowDataHelper: Bundle path: \(Bundle.main.bundlePath)")
+        NSLog("LowDataHelper: Mach service name: com.lowdata.helper")
+        
         // Configure listener
         listener.delegate = self
         
         // Start listening
         listener.resume()
+        NSLog("LowDataHelper: XPC listener resumed, waiting for connections...")
         
         // Keep the helper running
         RunLoop.current.run()
@@ -29,11 +36,8 @@ class LowDataHelper: NSObject {
 // MARK: - NSXPCListenerDelegate
 extension LowDataHelper: NSXPCListenerDelegate {
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
-        // Verify the connection is from our main app
-        guard verifyConnection(newConnection) else {
-            NSLog("LowDataHelper: Rejected unauthorized connection")
-            return false
-        }
+        // Log connection attempt
+        NSLog("LowDataHelper: Received connection request")
         
         // Configure the connection
         newConnection.exportedInterface = NSXPCInterface(with: LowDataHelperProtocol.self)
@@ -52,31 +56,20 @@ extension LowDataHelper: NSXPCListenerDelegate {
         // Resume the connection
         newConnection.resume()
         
+        NSLog("LowDataHelper: Connection accepted")
         return true
     }
-    
-    private func verifyConnection(_ connection: NSXPCConnection) -> Bool {
-        // TODO: Implement proper code signing verification
-        // For now, accept all connections (DEVELOPMENT ONLY)
-        return true
-    }
-}
-
-// MARK: - Helper Protocol
-@objc protocol LowDataHelperProtocol {
-    func applyBlockingRules(_ rules: [[String: Any]], reply: @escaping (Bool, String?) -> Void)
-    func removeAllBlockingRules(reply: @escaping (Bool, String?) -> Void)
-    func getHelperVersion(reply: @escaping (String) -> Void)
 }
 
 // MARK: - Helper Service Implementation
 class LowDataHelperService: NSObject, LowDataHelperProtocol {
     
-    private let helperVersion = "1.0.0"
+    private let helperVersion = "2.0.0" // Version 2.0 for SMAppService
     private let pfctlPath = "/sbin/pfctl"
     private let rulesFile = "/tmp/lowdata_rules.conf"
     
     func getHelperVersion(reply: @escaping (String) -> Void) {
+        NSLog("LowDataHelper: Version request - returning \(helperVersion)")
         reply(helperVersion)
     }
     
@@ -85,6 +78,10 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
         
         // Generate pfctl rules
         var pfRules = [String]()
+        
+        // Add a header comment
+        pfRules.append("# Low Data Blocking Rules - Generated \(Date())")
+        pfRules.append("")
         
         for rule in rules {
             guard let type = rule["type"] as? String else { continue }
@@ -95,6 +92,14 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
                    let proto = rule["protocol"] as? String {
                     // Block outgoing traffic to this port
                     pfRules.append("block drop out proto \(proto) from any to any port \(port)")
+                }
+                
+            case "portRange":
+                if let startPort = rule["startPort"] as? Int,
+                   let endPort = rule["endPort"] as? Int,
+                   let proto = rule["protocol"] as? String {
+                    // Block range of ports
+                    pfRules.append("block drop out proto \(proto) from any to any port \(startPort):\(endPort)")
                 }
                 
             case "service":
@@ -115,7 +120,7 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
                     // Add comment for clarity
                     pfRules.append("# Block application: \(bundleId)")
                     
-                    // Method 1: Block by known ports if available
+                    // Block by known ports if available
                     if let appPorts = rule["ports"] as? [[String: Any]] {
                         for portInfo in appPorts {
                             if let port = portInfo["port"] as? Int,
@@ -125,7 +130,7 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
                         }
                     }
                     
-                    // Method 2: Block by process owner (if we can determine it)
+                    // Method 2: Block by process (requires additional setup)
                     // This is more reliable than PID-based blocking
                     if let appPath = getApplicationPath(for: bundleId),
                        let executable = getExecutableName(from: appPath) {
@@ -133,14 +138,13 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
                         let tableName = bundleId.replacingOccurrences(of: ".", with: "_")
                         pfRules.append("table <\(tableName)_blocked> persist")
                         
-                        // Note: Full application blocking would require kernel extension
-                        // For now, we'll document the limitation
-                        pfRules.append("# Note: Full app blocking requires Network Extension")
+                        // Note: Full application blocking would require additional kernel-level support
+                        pfRules.append("# Note: Full app-level blocking requires additional system configuration")
                     }
                 }
                 
             default:
-                break
+                NSLog("LowDataHelper: Unknown rule type: \(type)")
             }
         }
         
@@ -149,6 +153,7 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
         
         do {
             try rulesContent.write(toFile: rulesFile, atomically: true, encoding: .utf8)
+            NSLog("LowDataHelper: Wrote \(pfRules.count) rules to \(rulesFile)")
             
             // Apply rules using pfctl
             let result = runCommand(pfctlPath, arguments: ["-f", rulesFile, "-e"])
@@ -189,7 +194,7 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
     }
     
     private func getApplicationPath(for bundleId: String) -> String? {
-        // Use LSCopyApplicationURLsForBundleIdentifier or mdfind to locate app
+        // Use mdfind to locate app by bundle ID
         let result = runCommand("/usr/bin/mdfind", arguments: ["kMDItemCFBundleIdentifier == '\(bundleId)'"])
         
         if result.0 == 0 && !result.1.isEmpty {
@@ -250,5 +255,6 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
 }
 
 // MARK: - Main Entry Point
+NSLog("LowDataHelper: Initializing helper daemon")
 let helper = LowDataHelper()
 helper.run()
