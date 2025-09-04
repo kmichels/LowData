@@ -76,10 +76,13 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
     func applyBlockingRules(_ rules: [[String: Any]], reply: @escaping (Bool, String?) -> Void) {
         NSLog("LowDataHelper: Applying \(rules.count) blocking rules")
         
+        // Use anchors to avoid affecting main ruleset
+        let anchorName = "com.lowdata"
+        
         // Generate pfctl rules
         var pfRules = [String]()
         
-        // Add a header comment
+        // Add header comment (no anchor definition needed when loading INTO an anchor)
         pfRules.append("# Low Data Blocking Rules - Generated \(Date())")
         pfRules.append("")
         
@@ -155,11 +158,15 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
             try rulesContent.write(toFile: rulesFile, atomically: true, encoding: .utf8)
             NSLog("LowDataHelper: Wrote \(pfRules.count) rules to \(rulesFile)")
             
-            // Apply rules using pfctl
-            let result = runCommand(pfctlPath, arguments: ["-f", rulesFile, "-e"])
+            // First, enable pfctl if not already enabled (without -f to avoid flushing)
+            _ = runCommand(pfctlPath, arguments: ["-e"])
+            
+            // Load rules into our anchor (not the main ruleset)
+            // Using -a to specify anchor avoids flushing main rules
+            let result = runCommand(pfctlPath, arguments: ["-a", anchorName, "-f", rulesFile])
             
             if result.0 == 0 {
-                NSLog("LowDataHelper: Successfully applied \(pfRules.count) rules")
+                NSLog("LowDataHelper: Successfully applied \(pfRules.count) rules to anchor \(anchorName)")
                 reply(true, nil)
             } else {
                 let error = "Failed to apply rules: \(result.1)"
@@ -177,17 +184,19 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
     func removeAllBlockingRules(reply: @escaping (Bool, String?) -> Void) {
         NSLog("LowDataHelper: Removing all blocking rules")
         
-        // Flush pfctl rules
-        let result = runCommand(pfctlPath, arguments: ["-F", "rules"])
+        let anchorName = "com.lowdata"
+        
+        // Flush only our anchor rules (not the entire system ruleset!)
+        let result = runCommand(pfctlPath, arguments: ["-a", anchorName, "-F", "rules"])
         
         if result.0 == 0 {
             // Clean up rules file
             try? FileManager.default.removeItem(atPath: rulesFile)
             
-            NSLog("LowDataHelper: Successfully removed all rules")
+            NSLog("LowDataHelper: Successfully removed all rules from anchor \(anchorName)")
             reply(true, nil)
         } else {
-            let error = "Failed to flush rules: \(result.1)"
+            let error = "Failed to flush anchor rules: \(result.1)"
             NSLog("LowDataHelper: \(error)")
             reply(false, error)
         }
