@@ -6,6 +6,7 @@ struct LowDataApp: App {
     @StateObject private var trafficMonitor = TrafficMonitor()
     @StateObject private var networkDetector = NetworkDetector()
     @AppStorage("runInMenuBar") private var runInMenuBar = false
+    @AppStorage("windowFrame") private var savedWindowFrame = ""
     @State private var menuBarController: MenuBarController?
     @State private var mainWindowController: NSWindowController?
     @State private var hasSetupInitialMode = false
@@ -44,12 +45,60 @@ struct LowDataApp: App {
                             }
                         }
                     }
+                    
+                    // Set up window frame restoration
+                    await MainActor.run { @MainActor in
+                        if let window = NSApp.windows.first(where: { window in
+                            !window.className.contains("NSStatusBarWindow") &&
+                            !window.title.contains("Settings") &&
+                            !window.title.contains("Preferences")
+                        }) {
+                            // Restore saved frame if available
+                            if !savedWindowFrame.isEmpty,
+                               let frame = NSRectFromString(savedWindowFrame) as NSRect? {
+                                window.setFrame(frame, display: true)
+                            }
+                            
+                            // Set up frame autosave
+                            window.setFrameAutosaveName("LowDataMainWindow")
+                            
+                            // Also save to our AppStorage when window moves/resizes
+                            NotificationCenter.default.addObserver(
+                                forName: NSWindow.didMoveNotification,
+                                object: window,
+                                queue: .main
+                            ) { _ in
+                                savedWindowFrame = NSStringFromRect(window.frame)
+                            }
+                            
+                            NotificationCenter.default.addObserver(
+                                forName: NSWindow.didResizeNotification,
+                                object: window,
+                                queue: .main
+                            ) { _ in
+                                savedWindowFrame = NSStringFromRect(window.frame)
+                            }
+                        }
+                    }
                 }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
         .commands {
-            // Settings are handled by the Settings scene
+            // Add command menu shortcuts
+            CommandGroup(replacing: .appInfo) {
+                Button("About Low Data") {
+                    // Show about window
+                    NSApp.orderFrontStandardAboutPanel(nil)
+                }
+            }
+            
+            CommandGroup(replacing: .appSettings) {
+                SettingsLink {
+                    Text("Settings...")
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
         
         Settings {
@@ -143,13 +192,41 @@ struct LowDataApp: App {
                     let hostingController = NSHostingController(rootView: contentView)
                     let window = NSWindow(contentViewController: hostingController)
                     window.title = "Low Data"
-                    window.setContentSize(NSSize(width: 500, height: 400))
+                    
+                    // Restore saved frame if available, otherwise use defaults
+                    if !self.savedWindowFrame.isEmpty,
+                       let savedFrame = NSRectFromString(self.savedWindowFrame) as NSRect? {
+                        window.setFrame(savedFrame, display: false)
+                    } else {
+                        window.setContentSize(NSSize(width: 500, height: 400))
+                        window.center()
+                    }
+                    
                     // Match the original window style from WindowGroup
                     window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
                     window.titlebarAppearsTransparent = true
                     window.titleVisibility = .hidden
                     window.isMovableByWindowBackground = true
-                    window.center()
+                    
+                    // Set up frame autosave
+                    window.setFrameAutosaveName("LowDataMainWindow")
+                    
+                    // Save frame when window moves/resizes
+                    NotificationCenter.default.addObserver(
+                        forName: NSWindow.didMoveNotification,
+                        object: window,
+                        queue: .main
+                    ) { _ in
+                        self.savedWindowFrame = NSStringFromRect(window.frame)
+                    }
+                    
+                    NotificationCenter.default.addObserver(
+                        forName: NSWindow.didResizeNotification,
+                        object: window,
+                        queue: .main
+                    ) { _ in
+                        self.savedWindowFrame = NSStringFromRect(window.frame)
+                    }
                     
                     // Create and store window controller
                     let windowController = NSWindowController(window: window)

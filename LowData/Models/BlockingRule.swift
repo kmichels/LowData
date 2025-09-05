@@ -84,10 +84,10 @@ extension BlockingRule {
             type: .service(
                 name: "SMB",
                 ports: [
-                    PortRule(port: 445, `protocol`: .tcp),
-                    PortRule(port: 139, `protocol`: .tcp),
-                    PortRule(port: 137, `protocol`: .udp),
-                    PortRule(port: 138, `protocol`: .udp)
+                    PortRule(port: 445, protocol: .tcp),
+                    PortRule(port: 139, protocol: .tcp),
+                    PortRule(port: 137, protocol: .udp),
+                    PortRule(port: 138, protocol: .udp)
                 ]
             ),
             isEnabled: false,
@@ -101,7 +101,7 @@ extension BlockingRule {
             type: .service(
                 name: "AFP",
                 ports: [
-                    PortRule(port: 548, `protocol`: .tcp)
+                    PortRule(port: 548, protocol: .tcp)
                 ]
             ),
             isEnabled: false,
@@ -115,7 +115,7 @@ extension BlockingRule {
             type: .service(
                 name: "VNC",
                 ports: [
-                    PortRule(port: 5900, `protocol`: .tcp)
+                    PortRule(port: 5900, protocol: .tcp)
                 ]
             ),
             isEnabled: false,
@@ -129,8 +129,8 @@ extension BlockingRule {
             type: .service(
                 name: "FTP",
                 ports: [
-                    PortRule(port: 20, `protocol`: .tcp),
-                    PortRule(port: 21, `protocol`: .tcp)
+                    PortRule(port: 20, protocol: .tcp),
+                    PortRule(port: 21, protocol: .tcp)
                 ]
             ),
             isEnabled: false,
@@ -144,7 +144,7 @@ extension BlockingRule {
             type: .service(
                 name: "Telnet",
                 ports: [
-                    PortRule(port: 23, `protocol`: .tcp)
+                    PortRule(port: 23, protocol: .tcp)
                 ]
             ),
             isEnabled: false,

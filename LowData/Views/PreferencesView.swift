@@ -52,6 +52,7 @@ struct PreferencesView: View {
 struct GeneralTab: View {
     @Binding var runInMenuBar: Bool
     @AppStorage("launchAtLogin") private var launchAtLogin = false
+    @AppStorage("menuBarIconStyle") private var menuBarIconStyle = "emoji"
     
     var body: some View {
         Form {
@@ -62,6 +63,23 @@ struct GeneralTab: View {
                 Toggle("Launch at login", isOn: $launchAtLogin)
                     .help("Automatically start Low Data when you log in")
                     .disabled(true) // TODO: Implement launch at login
+            }
+            
+            Section("Menu Bar Options") {
+                Picker("Icon style:", selection: $menuBarIconStyle) {
+                    HStack {
+                        Text("📊")
+                        Text("Emoji")
+                    }.tag("emoji")
+                    
+                    HStack {
+                        Image(systemName: "chart.bar.fill")
+                        Text("SF Symbol")
+                    }.tag("sfSymbol")
+                }
+                .pickerStyle(.radioGroup)
+                .help("Choose the icon style for the menu bar")
+                .disabled(!runInMenuBar)
             }
             
             Section("Behavior") {

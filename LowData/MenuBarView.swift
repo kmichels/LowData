@@ -9,6 +9,7 @@ class MenuBarController: NSObject {
     private var networkDetector: NetworkDetector
     private var eventMonitor: Any?
     private var onModeChange: ((Bool) -> Void)?
+    @AppStorage("menuBarIconStyle") private var menuBarIconStyle = "emoji" // "emoji" or "sfSymbol"
     
     init(monitor: TrafficMonitor, networkDetector: NetworkDetector, onModeChange: @escaping (Bool) -> Void) {
         self.monitor = monitor
@@ -80,13 +81,36 @@ class MenuBarController: NSObject {
             guard let self = self,
                   let button = self.statusItem?.button else { return }
             
-            if self.monitor.isMonitoring {
-                let rate = self.formatRate(self.monitor.totalRate)
-                button.title = "📊 \(rate)"
-                button.toolTip = "Low Data - Click to view details"
+            if self.menuBarIconStyle == "sfSymbol" {
+                // Use SF Symbol
+                if let image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "Low Data") {
+                    // Configure the image
+                    let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular, scale: .medium)
+                    let configuredImage = image.withSymbolConfiguration(config)
+                    
+                    button.image = configuredImage
+                    button.imagePosition = .imageLeft
+                    
+                    if self.monitor.isMonitoring {
+                        let rate = self.formatRate(self.monitor.totalRate)
+                        button.title = " \(rate)"
+                        button.toolTip = "Low Data - Click to view details"
+                    } else {
+                        button.title = ""
+                        button.toolTip = "Low Data - Not monitoring"
+                    }
+                }
             } else {
-                button.title = "📊"
-                button.toolTip = "Low Data - Not monitoring"
+                // Use emoji (default)
+                button.image = nil
+                if self.monitor.isMonitoring {
+                    let rate = self.formatRate(self.monitor.totalRate)
+                    button.title = "📊 \(rate)"
+                    button.toolTip = "Low Data - Click to view details"
+                } else {
+                    button.title = "📊"
+                    button.toolTip = "Low Data - Not monitoring"
+                }
             }
         }
     }
@@ -164,28 +188,14 @@ class MenuBarController: NSObject {
             closePopover()
         }
         
-        // Activate the app first to ensure menu bar is available
+        // Activate the app first
         NSApp.activate(ignoringOtherApps: true)
         
-        // Use the Settings menu item directly
-        Task { @MainActor in
-            // Small delay to ensure activation completes
-            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
-            
-            // Try to open Settings using the menu item
-            if let appMenu = NSApp.mainMenu?.items.first?.submenu {
-                for item in appMenu.items {
-                    if item.title.contains("Settings") || item.title.contains("Preferences") {
-                        NSApp.sendAction(item.action!, to: item.target, from: nil)
-                        return
-                    }
-                }
-            }
-            
-            // Fallback - open settings window directly
-            if let settingsWindow = NSApp.windows.first(where: { $0.title.contains("Settings") || $0.title.contains("Preferences") }) {
-                settingsWindow.makeKeyAndOrderFront(nil)
-            }
+        // Open Settings window using the official API for macOS 14+
+        if #available(macOS 13, *) {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        } else {
+            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
         }
     }
     

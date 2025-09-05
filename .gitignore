@@ -92,6 +92,7 @@ iOSInjectionProject/
 # macOS
 .DS_Store
 
-# Internal documentation - only README.md should be in repo
+# Internal documentation - only README.md and HELPER_TROUBLESHOOTING.md should be in repo
 *.md
 !README.md
+!HELPER_TROUBLESHOOTING.md

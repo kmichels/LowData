@@ -1,13 +1,5 @@
 import Foundation
 import ServiceManagement
-import Security
-
-// MARK: - Helper Tool Protocol (must match helper's protocol)
-@objc protocol LowDataHelperProtocol {
-    func applyBlockingRules(_ rules: [[String: Any]], reply: @escaping (Bool, String?) -> Void)
-    func removeAllBlockingRules(reply: @escaping (Bool, String?) -> Void)
-    func getHelperVersion(reply: @escaping (String) -> Void)
-}
 
 @MainActor
 class HelperToolManager: ObservableObject {
@@ -15,102 +7,273 @@ class HelperToolManager: ObservableObject {
     // MARK: - Properties
     @Published var isHelperInstalled = false
     @Published var helperVersion: String?
+    @Published var installationError: String?
     
     private let helperBundleID = "com.lowdata.helper"
     private var helperConnection: NSXPCConnection?
+    private var daemonService: SMAppService?
     
     // MARK: - Initialization
     init() {
-        checkHelperStatus()
+        setupDaemonService()
+        
+        // Check status asynchronously to avoid blocking UI
+        Task { @MainActor in
+            checkHelperStatus()
+        }
+        
+        // Periodically check helper status to stay in sync
+        Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+            Task { @MainActor in
+                self.checkHelperStatus()
+            }
+        }
     }
     
-    // MARK: - Helper Installation
+    private func setupDaemonService() {
+        // SMAppService requires the plist filename WITH the .plist extension
+        // The plist must be in Contents/Library/LaunchDaemons/
+        // ChatGPT research confirms: include .plist extension in the name
+        daemonService = SMAppService.daemon(plistName: "com.lowdata.helper.plist")
+    }
+    
+    // MARK: - Helper Installation using SMAppService
     
     func installHelper(completion: @escaping (Bool, String?) -> Void) {
-        // Request authorization
-        var authRef: AuthorizationRef?
-        var authStatus = AuthorizationCreate(nil, nil, [], &authRef)
-        
-        guard authStatus == errAuthorizationSuccess else {
-            completion(false, "Failed to create authorization")
+        guard let service = daemonService else {
+            completion(false, "Failed to initialize daemon service")
             return
         }
         
-        // Create authorization item for installing helper
-        var authItem = AuthorizationItem(
-            name: kSMRightBlessPrivilegedHelper,
-            valueLength: 0,
-            value: nil,
-            flags: 0
-        )
-        
-        var authRights = AuthorizationRights(
-            count: 1,
-            items: &authItem
-        )
-        
-        let authFlags: AuthorizationFlags = [
-            .interactionAllowed,
-            .extendRights,
-            .preAuthorize
-        ]
-        
-        authStatus = AuthorizationCopyRights(
-            authRef!,
-            &authRights,
-            nil,
-            authFlags,
-            nil
-        )
-        
-        guard authStatus == errAuthorizationSuccess else {
-            AuthorizationFree(authRef!, [])
-            completion(false, "User cancelled authorization")
+        Task {
+            do {
+                // Register the daemon with the system
+                try service.register()
+                
+                // Update status on main actor
+                await MainActor.run {
+                    self.installationError = nil
+                    self.checkHelperStatus()
+                    // Let checkHelperStatus determine if it's really installed
+                    completion(self.isHelperInstalled, nil)
+                }
+            } catch {
+                let errorMessage = "Failed to register helper: \(error.localizedDescription)"
+                
+                await MainActor.run {
+                    self.isHelperInstalled = false
+                    self.installationError = errorMessage
+                    completion(false, errorMessage)
+                }
+            }
+        }
+    }
+    
+    func uninstallHelper(completion: @escaping (Bool, String?) -> Void) {
+        guard let service = daemonService else {
+            completion(false, "Failed to initialize daemon service")
             return
         }
         
-        // Install helper using SMJobBless
-        var error: Unmanaged<CFError>?
-        let success = SMJobBless(
-            kSMDomainSystemLaunchd,
-            helperBundleID as CFString,
-            authRef,
-            &error
-        )
-        
-        AuthorizationFree(authRef!, [])
-        
-        if success {
-            isHelperInstalled = true
-            checkHelperStatus()
-            completion(true, nil)
-        } else {
-            let errorString = error?.takeRetainedValue().localizedDescription ?? "Unknown error"
-            completion(false, "Failed to install helper: \(errorString)")
+        Task {
+            do {
+                // Check current status first
+                let status = service.status
+                
+                switch status {
+                case .notRegistered:
+                    await MainActor.run {
+                        completion(true, "Helper was not installed")
+                    }
+                    
+                case .enabled, .requiresApproval, .notFound:
+                    // Try to unregister
+                    try await service.unregister()
+                    
+                    await MainActor.run {
+                        self.isHelperInstalled = false
+                        self.helperVersion = nil
+                        completion(true, nil)
+                    }
+                    
+                @unknown default:
+                    await MainActor.run {
+                        completion(false, "Unknown helper status")
+                    }
+                }
+            } catch {
+                let errorMessage = "Failed to unregister helper: \(error.localizedDescription)"
+                
+                await MainActor.run {
+                    completion(false, errorMessage)
+                }
+            }
         }
     }
     
     func checkHelperStatus() {
-        // Check if helper is installed
-        let connection = NSXPCConnection(machServiceName: helperBundleID)
+        guard let service = daemonService else {
+            print("HelperToolManager: No daemon service available")
+            isHelperInstalled = false
+            return
+        }
+        
+        // Check registration status
+        let status = service.status
+        print("HelperToolManager: Helper status = \(status)")
+        
+        switch status {
+        case .enabled:
+            // Helper is registered and enabled
+            print("HelperToolManager: Helper is enabled")
+            
+            // For now, assume it's installed if registered
+            // Then verify connection async without blocking
+            isHelperInstalled = true
+            
+            // Check connection in background
+            Task {
+                await checkHelperProcessAsync()
+            }
+            
+        case .requiresApproval:
+            // User needs to approve in System Settings
+            print("HelperToolManager: Helper requires approval")
+            isHelperInstalled = false
+            installationError = "Helper requires approval in System Settings > Privacy & Security"
+            
+        case .notRegistered:
+            // Helper is not installed
+            print("HelperToolManager: Helper not registered")
+            isHelperInstalled = false
+            helperVersion = nil
+            
+        case .notFound:
+            // Helper binary not found in bundle
+            print("HelperToolManager: Helper not found in bundle")
+            isHelperInstalled = false
+            installationError = "Helper binary not found in application bundle"
+            
+        @unknown default:
+            print("HelperToolManager: Unknown status")
+            isHelperInstalled = false
+            installationError = "Unknown helper status"
+        }
+    }
+    
+    private func checkHelperProcessAsync() async {
+        print("HelperToolManager: Checking helper process async...")
+        
+        // Don't block on process checking - just verify with XPC connection
+        // The XPC connection attempt will tell us if the helper is actually running
+        await withCheckedContinuation { continuation in
+            verifyHelperConnectionWithTimeout { [weak self] success in
+                Task { @MainActor in
+                    if !success {
+                        self?.helperVersion = nil
+                        self?.installationError = "Helper registered but not responding"
+                        print("HelperToolManager: Helper not responding to XPC")
+                    } else {
+                        self?.installationError = nil
+                        print("HelperToolManager: Helper is responding to XPC")
+                    }
+                }
+                continuation.resume()
+            }
+        }
+    }
+    
+    private func helperProcessIsRunning() -> Bool {
+        // Check if the helper process is actually running
+        let task = Process()
+        task.launchPath = "/bin/ps"
+        task.arguments = ["aux"]
+        
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8) {
+                return output.contains("com.lowdata.helper")
+            }
+        } catch {
+            print("HelperToolManager: Failed to check process status: \(error)")
+        }
+        
+        return false
+    }
+    
+    private func verifyHelperConnectionWithTimeout(completion: @escaping (Bool) -> Void) {
+        print("HelperToolManager: Attempting to verify helper connection...")
+        
+        let connection = NSXPCConnection(machServiceName: helperBundleID, options: .privileged)
         connection.remoteObjectInterface = NSXPCInterface(with: LowDataHelperProtocol.self)
         connection.resume()
         
+        var responded = false
+        
         let helper = connection.remoteObjectProxyWithErrorHandler { error in
-            Task { @MainActor in
-                self.isHelperInstalled = false
-                self.helperVersion = nil
+            print("HelperToolManager: Connection failed: \(error.localizedDescription)")
+            if !responded {
+                responded = true
+                completion(false)
             }
         } as? LowDataHelperProtocol
         
         helper?.getHelperVersion { version in
-            Task { @MainActor in
-                self.isHelperInstalled = true
-                self.helperVersion = version
+            print("HelperToolManager: Helper responded with version: \(version)")
+            if !responded {
+                responded = true
+                Task { @MainActor in
+                    self.helperVersion = version
+                    completion(true)
+                }
             }
         }
         
-        // Keep connection briefly to check
+        // Timeout after 2 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            connection.invalidate()
+            if !responded {
+                responded = true
+                print("HelperToolManager: Connection timed out")
+                completion(false)
+            }
+        }
+    }
+    
+    private func verifyHelperConnection() {
+        print("HelperToolManager: Verifying helper connection...")
+        
+        // Try to connect to the helper via XPC
+        let connection = NSXPCConnection(machServiceName: helperBundleID, options: .privileged)
+        connection.remoteObjectInterface = NSXPCInterface(with: LowDataHelperProtocol.self)
+        connection.resume()
+        
+        let helper = connection.remoteObjectProxyWithErrorHandler { [weak self] error in
+            print("HelperToolManager: XPC connection error: \(error.localizedDescription)")
+            Task { @MainActor in
+                // Don't reset isHelperInstalled here - the helper is installed per SMAppService
+                // Just note that we can't connect to it right now
+                self?.helperVersion = nil
+                self?.installationError = "Cannot connect to helper: \(error.localizedDescription)"
+                print("HelperToolManager: Helper installed but not responding. It may need to be started.")
+            }
+        } as? LowDataHelperProtocol
+        
+        helper?.getHelperVersion { [weak self] version in
+            print("HelperToolManager: Successfully connected to helper, version: \(version)")
+            Task { @MainActor in
+                self?.helperVersion = version
+                self?.installationError = nil
+            }
+        }
+        
+        // Clean up connection after check
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             connection.invalidate()
         }
@@ -123,7 +286,7 @@ class HelperToolManager: ObservableObject {
             return connection
         }
         
-        let connection = NSXPCConnection(machServiceName: helperBundleID)
+        let connection = NSXPCConnection(machServiceName: helperBundleID, options: .privileged)
         connection.remoteObjectInterface = NSXPCInterface(with: LowDataHelperProtocol.self)
         
         connection.invalidationHandler = { [weak self] in
@@ -182,6 +345,11 @@ class HelperToolManager: ObservableObject {
                 ruleDict["type"] = "application"
                 ruleDict["bundleId"] = bundleId
                 ruleDict["name"] = name
+                
+                // Also include known ports for this application if available
+                if let appPorts = getKnownPortsForApp(bundleId) {
+                    ruleDict["ports"] = appPorts
+                }
             }
             
             rulesDicts.append(ruleDict)
@@ -214,6 +382,20 @@ class HelperToolManager: ObservableObject {
             Task { @MainActor in
                 completion(success, error)
             }
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func getKnownPortsForApp(_ bundleId: String) -> [[String: Any]]? {
+        // Return known ports for common applications
+        switch bundleId {
+        case "com.apple.ScreenSharing":
+            return [["port": 5900, "protocol": "tcp"]]
+        case "com.apple.RemoteDesktop":
+            return [["port": 3283, "protocol": "tcp"], ["port": 5900, "protocol": "tcp"]]
+        default:
+            return nil
         }
     }
 }

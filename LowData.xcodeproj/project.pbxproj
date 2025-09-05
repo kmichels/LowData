@@ -109,6 +109,7 @@
 				712CE3ED2E647006007BAA72 /* Sources */,
 				712CE3EE2E647006007BAA72 /* Frameworks */,
 				712CE3EF2E647006007BAA72 /* Resources */,
+				71F646452E691D9C0023C50E /* Copy Helper Files */,
 				712210052E647386007DBF1C /* Embed System Extensions */,
 			);
 			buildRules = (
@@ -169,6 +170,32 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		71F646452E691D9C0023C50E /* Copy Helper Files */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${SRCROOT}/LowData/LaunchDaemons/com.lowdata.helper.plist",
+				"${SRCROOT}/LowData/LaunchDaemons/com.lowdata.helper.xpc",
+			);
+			name = "Copy Helper Files";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Library/LaunchDaemons/com.lowdata.helper",
+				"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Library/LaunchDaemons/com.lowdata.helper.plist",
+				"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Library/LaunchDaemons/com.lowdata.helper.xpc",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Script to copy helper files to app bundle during build\n# This ensures the helper persists through Xcode rebuilds\n\necho \"Copying helper files to app bundle...\"\necho \"CODE_SIGN_IDENTITY: ${CODE_SIGN_IDENTITY}\"\necho \"EXPANDED_CODE_SIGN_IDENTITY: ${EXPANDED_CODE_SIGN_IDENTITY}\"\necho \"DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}\"\n\n# Get the app bundle path from Xcode environment\nAPP_BUNDLE=\"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app\"\n\n# Create LaunchDaemons directory\nmkdir -p \"${APP_BUNDLE}/Contents/Library/LaunchDaemons\"\n\n# Build helper if source is newer than binary\nHELPER_SOURCE=\"${SRCROOT}/LowDataHelper/main.swift\"\nHELPER_BINARY=\"${SRCROOT}/LowData/LaunchDaemons/com.lowdata.helper.xpc\"\n\nPROTOCOL_SOURCE=\"${SRCROOT}/LowDataHelper/LowDataHelperProtocol.swift\"\n\nif [ \"$HELPER_SOURCE\" -nt \"$HELPER_BINARY\" ] || [ \"$PROTOCOL_SOURCE\" -nt \"$HELPER_BINARY\" ] || [ ! -f \"$HELPER_BINARY\" ]; then\n    echo \"Building helper binary...\"\n    # Check if we can access the source files\n    if [ ! -r \"$HELPER_SOURCE\" ]; then\n        echo \"Warning: Cannot read helper source file, skipping build\"\n    elif [ ! -r \"$PROTOCOL_SOURCE\" ]; then\n        echo \"Warning: Cannot read protocol source file, skipping build\"\n    else\n        # Build with embedded Info.plist and launchd plist\n        swiftc -o \"$HELPER_BINARY\" \"$HELPER_SOURCE\" \"$PROTOCOL_SOURCE\" \\\n            -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker \"${SRCROOT}/LowDataHelper/Info.plist\" \\\n            -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __launchd_plist -Xlinker \"${SRCROOT}/LowData/LaunchDaemons/com.lowdata.helper.plist\" 2>&1 || echo \"Warning: Helper build failed, using existing binary\"\n    fi\n    \n    # Sign the built binary immediately if we have signing identity\n    if [ -n \"${CODE_SIGN_IDENTITY}\" ] && [ \"${CODE_SIGN_IDENTITY}\" != \"-\" ]; then\n        echo \"Signing built helper with identity: ${CODE_SIGN_IDENTITY}\"\n        codesign --force --deep --sign \"${CODE_SIGN_IDENTITY}\" --identifier \"com.lowdata.helper\" --options runtime \"$HELPER_BINARY\"\n    elif [ -n \"${DEVELOPMENT_TEAM}\" ]; then\n        # Fallback to development team signing\n        echo \"Signing built helper with development team: ${DEVELOPMENT_TEAM}\"\n        codesign --force --deep --sign \"Apple Development\" --team \"${DEVELOPMENT_TEAM}\" --identifier \"com.lowdata.helper\" --options runtime \"$HELPER_BINARY\"\n    fi\nfi\n\n# Copy helper binary\ncp \"${SRCROOT}/LowData/LaunchDaemons/com.lowdata.helper.xpc\" \"${APP_BUNDLE}/Contents/Library/LaunchDaemons/\"\n\n# Copy plist files\ncp \"${SRCROOT}/LowData/LaunchDaemons/com.lowdata.helper.plist\" \"${APP_BUNDLE}/Contents/Library/LaunchDaemons/\"\n# Also copy without extension for SMAppService\ncp \"${SRCROOT}/LowData/LaunchDaemons/com.lowdata.helper.plist\" \"${APP_BUNDLE}/Contents/Library/LaunchDaemons/com.lowdata.helper\"\n\n# Sign the copied helper binary in the app bundle\nif [ -n \"${CODE_SIGN_IDENTITY}\" ] && [ \"${CODE_SIGN_IDENTITY}\" != \"-\" ]; then\n    echo \"Signing helper in app bundle with identity: ${CODE_SIGN_IDENTITY}\"\n    codesign --force --deep --sign \"${CODE_SIGN_IDENTITY}\" --identifier \"com.lowdata.helper\" --options runtime \"${APP_BUNDLE}/Contents/Library/LaunchDaemons/com.lowdata.helper.xpc\"\nelif [ -n \"${DEVELOPMENT_TEAM}\" ]; then\n    # Fallback to development team signing\n    echo \"Signing helper in app bundle with development team: ${DEVELOPMENT_TEAM}\"\n    codesign --force --deep --sign \"Apple Development\" --team \"${DEVELOPMENT_TEAM}\" --identifier \"com.lowdata.helper\" --options runtime \"${APP_BUNDLE}/Contents/Library/LaunchDaemons/com.lowdata.helper.xpc\"\nelse\n    echo \"Warning: No code signing identity found\"\nfi\n\necho \"Helper files copied successfully\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		712CE3ED2E647006007BAA72 /* Sources */ = {
