@@ -1,0 +1,181 @@
+SMAppService Daemon Migration: Examples, Issues, and Debugging Guide
+
+Background: Apple introduced the SMAppService API in macOS 13+ to replace the older SMJobBless for installing privileged helpers. Unlike SMJobBless (which copied helper tools to /Library/PrivilegedHelperTools), the new API keeps launchd daemons embedded inside the app bundle ￼. Konrad’s app migrated to SMAppService.daemon on macOS 15 (Sequoia), but the helper isn’t launching: registration succeeds, yet an NSXPCConnection to the Mach service fails with “Couldn’t communicate with a helper application” ￼. Below, we provide a comprehensive guide with working examples, common pitfalls, debugging techniques, and configuration checklists to get an SMAppService daemon running properly.
+
+Working Examples of SMAppService Daemons
+
+Several projects and guides demonstrate how to use SMAppService.daemon(...) successfully:
+	•	DaemonExample (Swift): Developer Bryson Tyrrell created a sample app with an embedded daemon using SMAppService on macOS 14 ￼ ￼. The main app registers a LaunchDaemon and communicates via XPC. The LaunchDaemon’s property list (com.example.DaemonExample.Helper.plist) uses the new keys: for example, it specifies a BundleProgram relative path and a Mach service name:
+
+<key>BundleProgram</key>
+<string>Contents/Resources/Helper</string>
+<key>Label</key>
+<string>com.example.DaemonExample.Helper</string>
+<key>MachServices</key>
+<dict>
+    <key>com.example.DaemonExample.Helper</key>
+    <true/>
+</dict>
+<key>RunAtLoad</key>
+<true/>
+
+Excerpt from DaemonExample’s LaunchDaemon plist ￼ ￼. Here, BundleProgram points to the helper’s executable inside the app bundle, and MachServices publishes a Mach port under the same identifier for XPC. In code, the app calls:
+
+let service = SMAppService.daemon(plistName: "com.example.DaemonExample.Helper.plist")
+try service.register()
+
+This registers the daemon (prompting the user for approval/admin rights). The sample then opens an NSXPCConnection to the Mach service "com.example.DaemonExample.Helper" and successfully calls the helper’s methods ￼ ￼. This project illustrates a minimal working setup using SMAppService for a root daemon with XPC.
+
+	•	Privileged Helper (macOS 15, Swift): A detailed guide by GitHub user malpern provides a reference implementation for a privileged helper on macOS 15 (Sequoia) using SMAppService ￼ ￼. The repository “privileged_helper_help” includes a working example and step-by-step instructions. The LaunchDaemon plist in this example is similar, e.g.:
+
+<key>Label</key>
+<string>com.keypath.helperpoc.helper</string>
+<key>BundleProgram</key>
+<string>Contents/MacOS/helperpoc-helper</string>
+<key>AssociatedBundleIdentifiers</key>
+<array>
+    <string>com.keypath.helperpoc</string>
+</array>
+<key>MachServices</key>
+<dict>
+    <key>com.keypath.helperpoc.xpc</key>
+    <true/>
+</dict>
+
+Snippet from malpern’s example plist ￼ ￼. The helper binary (helperpoc-helper) is placed in the Contents/MacOS folder, and the plist resides in Contents/Library/LaunchDaemons/. Notably, they include an AssociatedBundleIdentifiers key linking the daemon to the main app’s bundle ID ￼. The main app registers the daemon by including the .plist extension in the name when calling SMAppService.daemon(plistName:) ￼. This example also comes with a troubleshooting checklist and was vetted by Apple DTS engineers, making it a reliable template for migrating off SMJobBless.
+
+	•	Apple’s Documentation & Samples: Apple’s official docs (“Updating helper executables from earlier versions of macOS”) emphasize replacing the old SMJobBless keys with the new bundle-based approach. Specifically, “In the agents and daemons property lists, replace the Program key with the BundleProgram key and make the path relative to the bundle, such as Contents/Resources/mydaemon.” ￼. Apple’s WWDC 2023 session on background tasks also covers SMAppService (mostly for LoginItems/Agents). At this time, Apple hasn’t published a standalone sample code for an SMAppService LaunchDaemon, but the above community examples have filled that gap.
+
+Common Pitfalls and Issues in SMAppService Daemons
+
+When migrating from SMJobBless or setting up a new daemon with SMAppService, developers often encounter similar issues:
+	•	Legacy Keys Left in Place: Remove any SMJobBless-specific keys from your app. The main app’s Info.plist should not contain SMPrivilegedExecutables, and the helper’s Info.plist should not contain SMAuthorizedClients under the new system ￼. Those keys are for the legacy API; mixing them with SMAppService can cause errors (e.g. “unable to read plist” or registration failure ￼). In an SMAppService setup, code signing requirements are handled automatically via the bundle and the system’s background task management, so those explicit client lists are no longer used.
+	•	Incorrect Plist Keys or Paths: The launchd property list must use BundleProgram (not Program), pointing to a path relative to the app bundle for the helper executable ￼. A common mistake is providing an absolute path or just a bare filename. The correct format is usually "Contents/…/<HelperBinaryName>". For example, "Contents/Resources/HelperTool" or "Contents/MacOS/helperpoc-helper" are valid BundleProgram values ￼ ￼. Using an absolute path or leaving out the Contents/... prefix will prevent launchd from finding your binary (often resulting in exit code 78 as the daemon fails to launch). Tip: Ensure the BundleProgram string includes at least one directory (Contents/) – a lone filename is usually interpreted incorrectly (it’s safest to specify the full relative path from the app bundle root).
+	•	Missing .plist Extension in Code: When calling SMAppService.daemon(plistName:), include the “.plist” extension in the name. For instance, use "com.myapp.helper.plist" rather than "com.myapp.helper". If the extension is omitted, the registration can fail or target the wrong file ￼. In Konrad’s case, using plistName: "com.lowdata.helper" without “.plist” led to confusion – Apple’s API looks for a file matching that exact name. The updated guidance (confirmed by both Apple and community examples) is to pass the full filename with extension ￼.
+	•	File Placement and Copying: The helper’s launchd plist must be embedded in the app bundle at Contents/Library/LaunchDaemons/YourLabel.plist, and the helper executable must also be in the app bundle (e.g. in Contents/MacOS or Contents/Resources) ￼. Using Xcode, you should add a Copy Files phase to put the plist in Contents/Library/LaunchDaemons (with “Code Sign On Copy” enabled) ￼. Similarly, add the helper binary to the app bundle resources (or copy it into MacOS) ￼ ￼. A common oversight is forgetting to include the helper binary in the app bundle or not code-signing the plist on copy. If the plist or binary isn’t where the system expects, the service will register but never launch (or throw an error on registration). Always verify the built .app has the plist and helper in the correct locations.
+	•	Code Signing and Team IDs: Both the main app and the helper tool must be code-signed with the same Team ID and with the appropriate privileges. Typically, you’ll use a Developer ID Application certificate for distribution (or Apple Development for testing). The helper should be signed with hardened runtime enabled (use --options runtime). If code signing is incorrect, launchd may refuse to load the helper. For example, if the code signature doesn’t match the expected Team ID or the signature is invalid, you could see the daemon fail silently. In Konrad’s case, they confirmed matching Team IDs for app and helper ￼, so likely not the issue. But as a rule, ensure codesign reports the helper as “signed by Developer ID Application [TeamID]” and notarize the app for distribution. The new SMAppService flow does not require the manual authorization plist entry, but the code signature still needs to satisfy the system (the helper’s signature must chain to a trusted authority and contain its Info.plist section, etc.).
+	•	Associated Bundle Identifiers: While not strictly required to run, it’s recommended to include the AssociatedBundleIdentifiers key in your daemon’s plist, listing the main app’s bundle ID ￼. This ties the helper to your app in the System Settings > Login Items interface (so the background item appears under your app’s name). Without it, the daemon might show up generically or not be grouped with the app. It also hints to the system which app “owns” the daemon, which could be important for permission flows. Konrad’s plist did include this (pointing to com.tonalphoto.tech.LowData as the main app) ￼, so that was correct. If you omit it, the daemon can still run, but the user experience in Settings is poorer.
+	•	Process Type and Sandbox: For a LaunchDaemon (which runs as root and has no UI), use ProcessType = "Background" in the plist ￼. Konrad initially had it as “Interactive” which is meant for UI elements and could cause problems (launchd might treat an interactive daemon differently). Changing it to “Background” is the right move ￼. Also note that if your main app is sandboxed, as of macOS 14.2 the system requires the helper daemon to be sandboxed too ￼ ￼. This is an important (and somewhat undocumented) security change: a sandboxed app calling SMAppService.daemon must provide a sandboxed helper (e.g. include an App Sandbox entitlement for the helper, likely with com.apple.security.inherit so it inherits certain rights). Most Developer ID apps are not sandboxed (sandbox is primarily for Mac App Store apps, which historically couldn’t use SMJobBless anyway), but be aware of this if you attempt a sandboxed distribution – a non-sandboxed daemon will be rejected in that case.
+	•	User Approval Flow: A common point of confusion is the “Operation not permitted” error or .requiresApproval status after registration. When you first register the daemon, the system adds your app to the user’s Background Items list (in System Settings) but does not run it until the user explicitly enables it ￼. The SMAppService API will indicate SMAppServiceStatusRequiresApproval in this state. Your app should handle this by prompting the user or directing them to enable the helper. For example, you can check service.status and call SMAppService.openSystemSettingsLoginItems() to bring up the Settings screen ￼. Until approval, any attempt to actually use the helper (e.g. making an XPC call) will result in failure (“operation not permitted” or “couldn’t communicate with helper”). This is expected behavior. Once the user toggles it on, the status becomes .enabled and launchd will start the daemon on demand ￼. (If you run the app again after approval, service.status should report .enabled (value 1) ￼.)
+	•	Mach Service Name Mismatch: The XPC connection should use the same Mach service name as defined in the launchd plist. Ensure that the string in NSXPCConnection(machServiceName: ...) exactly matches the key under MachServices in the plist (it’s case-sensitive). For instance, if your plist has <key>com.lowdata.helper</key> in MachServices ￼, then use that identical "com.lowdata.helper" in your connection code. In Bryson’s example, both the MachService and XPC listener use "com.example.DaemonExample.Helper" ￼ ￼. A typo or mismatch here will lead to the “could not communicate” error because the XPC subsystem can’t find the port.
+	•	Standard Output/Error and Other Plist Keys: Be cautious with additional keys in the launchd plist. For example, adding StandardOutPath or StandardErrorPath can cause issues if not configured correctly. One developer found that setting those to a path without proper permissions caused launchd to report exit code 78 (config error), and removing them resolved the issue ￼ ￼. For an embedded daemon running as root, writing to /var/log is allowed for root, but if your daemon runs as a user agent or you specify a user path with root privileges, you could hit permission errors. In general, keep the plist minimal. Keys like KeepAlive or RunAtLoad can be used as needed (Konrad tried both true/false for RunAtLoad ￼; typically a root daemon might not RunAtLoad unless it performs a task on boot – otherwise it will launch on-demand when the Mach service is accessed). For debugging, you might omit StandardOut/Err and instead rely on the system log or manually log to a file if needed.
+	•	Executable Not Launching: If the helper never appears in the process list, double-check that the binary is present and executable. A forgotten chmod or a build script error could leave the binary without execute permissions, causing launchd to fail to exec it. This would also result in a status 78 or similar. As one user noted, “in my case I had forgotten to chmod +x the shell script” and got exit 78 ￼. For a compiled binary, this is usually not an issue (the linker marks it executable), but it’s worth verifying. Also ensure the binary isn’t quarantined or blocked by Gatekeeper – since it’s inside your app, and your app is signed and likely notarized, this should be fine.
+
+Debugging LaunchDaemons That Don’t Start
+
+If your helper daemon registers but doesn’t run, there are several techniques to investigate the problem:
+	•	Check Launchd’s Status: Use the Terminal to query launchd for your job’s status. For example, run:
+
+sudo launchctl list | grep com.lowdata.helper
+
+This will list any loaded job with “com.lowdata.helper” in its label. The output typically shows the PID (if running) or “-” if not, and the last exit code ￼. If you see an exit code like 78 in that listing, it confirms launchd tried to start it and hit a configuration error (78 = EX_CONFIG) ￼ ￼. You can get more detail with:
+
+sudo launchctl print system/com.lowdata.helper
+
+This prints the job’s configuration as known to launchd (and may show errors if any). If the job isn’t loaded at all, the print command will say it cannot find the service – meaning the registration likely failed or was not persisted.
+
+	•	System Logs (Unified Logging): macOS’s unified log is your friend. Open Console.app and search for your helper’s bundle identifier or label. You can also use the log command in Terminal. For example:
+
+log show --predicate 'eventMessage contains "com.lowdata.helper"' --last 5m
+
+Right after you attempt an XPC connection or registration, this can reveal messages. Look for entries from launchd, backgroundtaskmanagementd, or your app name. In Konrad’s logs, when the app tried to connect, the system’s background task manager logged the daemon config being used: it showed BTMConfigExecutablePath = "com.lowdata.helper.xpc" and BTMConfigLabel = "com.lowdata.helper" ￼. This indicates the system read the plist and attempted to launch the helper. If the helper exits or fails, launchd might log an error code or reason. Sometimes you may see a log like “Exited with code: 78” or a sandbox denial, etc., which can guide you to the root cause.
+
+	•	Use the Background Task Management Tool: Apple has a command-line tool sfltool (or sftool on newer systems) to inspect background items. Running sudo sfltool dumpbtm will dump the database of registered background tasks. In that output, find your app’s entry and the helper’s entry. For example, the EvilBit blog shows a daemon listed with its URL and Executable Path relative to the app bundle ￼ ￼. This can confirm that the system knows about your helper and sees the correct path. If the path or bundle ID looks wrong there, you likely have a packaging mistake. If you need to reset a broken registration (e.g. the system has a record of the daemon but the files are gone or config is messed up), you can use Apple’s recommended reset command: sudo sfltool resetbtm (followed by a reboot) will clear out all background items ￼. Use this with caution – it affects all background items, not just your app.
+	•	System Settings UI: After calling register(), always check System Settings > General > Login Items > “Allow in the Background”. Your app should appear in the list. For a LaunchDaemon (root privilege) it will say “⚙️ YourAppName.app – 1 item: 1 item affects all users” in the list. Ensure the switch is enabled (on) for your app’s item – if it’s off, the daemon will not run. The user must toggle it on (or approve via the initial prompt). Below is an example of how a registered daemon appears in System Settings:
+DaemonExample app listed in System Settings after registering its LaunchDaemon. The toggle must be on for the helper to run.
+If the toggle is on and the helper still isn’t running, you might try toggling it off and on again to force a reload. Remember that unregistering via SMAppService will remove it from this list (though a known macOS bug in Ventura left stale entries in some cases ￼).
+	•	Logging from the Helper: Since your helper may not produce console output before it’s fully running, consider using os_log or writing to a file for early debug messages. In Bryson’s example, they set up an OSLog logger and log messages when the XPC listener starts and when connections come in ￼ ￼. These logs show up in Console.app under the subsystem/category you define (or under the process name if using NSLog). If you’re not seeing any logs from your helper, it likely means it never actually launched or it crashed extremely early. Attaching a debugger to a LaunchDaemon is non-trivial (since it’s launched by launchd as root), but you can test-run the helper binary in a controlled way: for instance, run it manually with sudo in Terminal. It will probably quickly exit or idle waiting for an XPC connection, but if there are any obvious errors (like missing library or a crash on start), you’d see that in Terminal. This is not a perfect simulation (when run by launchd, the environment is slightly different), but it can help.
+	•	Validate Code Signature: Use codesign -dv --verbose=4 on the helper binary inside your built app bundle. Verify the Team ID matches the main app and that the designated requirement looks correct. Also ensure the Info.plist is embedded and lists the CFBundleIdentifier you expect. A mismatch here (e.g. if you signed the helper with a different certificate or forgot to sign it at all) will cause launchd to drop it. For instance, if the helper’s signature doesn’t satisfy the requirement anchor apple generic and certificate leaf[…] and certificate leaf[subject.OU] = "<TeamID>" that was embedded in the helper’s SMAuthorizedClients (if you left that key in), the connection would be refused. Removing SMAuthorizedClients avoids that, but the code signature still must be valid.
+	•	Look for Crash Reports: If the daemon starts and then crashes, there may be a crash log in Console.app > Crash Reports or in /Library/Logs/DiagnosticReports. A quick log show query for your process name around the time might also show an exception or signal if one occurred.
+
+By systematically using these tools – launchctl, log, sfltool, and System Settings – you can usually pinpoint where the process is failing (e.g., never launching due to config, launching but exiting, etc.).
+
+Configuration Checklist for SMAppService Helpers
+
+To ensure a smooth setup, use this checklist of requirements and best practices for an SMAppService LaunchDaemon:
+	1.	Bundle Structure: Include the helper’s launchd plist and executable in your app bundle. The typical layout is:
+
+MyApp.app/
+├── Contents/
+    ├── MacOS/
+    │   ├── MyApp            (main app binary)
+    │   └── HelperTool       (helper daemon binary)
+    └── Library/
+        └── LaunchDaemons/
+            └── com.mycompany.myapp.helper.plist
+
+Make sure the plist is in Library/LaunchDaemons/ and the helper binary is in an appropriate subdirectory (often Contents/MacOS or Contents/Resources) ￼. Both the plist and the binary should be included in the app’s code signature (Xcode’s copy phases with “Code Sign on Copy” will handle this).
+
+	2.	Launchd Plist Keys: Use the correct keys in the daemon’s plist:
+	•	Label: This should be a unique identifier, conventionally your helper’s bundle id (e.g. com.mycompany.myapp.helper). Often this matches the plist filename.
+	•	BundleProgram: The relative path to the helper binary within the app bundle. Start from Contents/. For example: <string>Contents/MacOS/HelperTool</string> or "Contents/Resources/HelperTool" ￼. Do not use a full absolute path or the old <key>Program</key>.
+	•	ProgramArguments: Generally omit this for XPC daemons. If you include ProgramArguments, the first argument should mirror BundleProgram. (In most cases, BundleProgram alone is sufficient to launch the executable, and arguments can be passed via the XPC connection or not at all.)
+	•	MachServices: Provide a dictionary with your Mach service name set to <true/>. This name is what clients use to connect. It can be the same as the Label, or different. For example: <key>com.mycompany.myapp.helper</key><true/> or with a suffix like “.xpc” if desired ￼. For a privileged helper, typically one MachService is exposed.
+	•	RunAtLoad: Optional. If true, launchd will start the daemon as soon as it’s loaded/approved (e.g. at boot or login). Many daemons use on-demand launching via MachServices, so RunAtLoad can be false (the daemon will launch when the app tries to connect). In Konrad’s case, they tried both; leaving it false is fine since the XPC request will trigger launchd to start the service.
+	•	KeepAlive: Optional. If your daemon should restart automatically when it exits, you can set <true/>. Otherwise, launchd will not relaunch it unless triggered again or manually started. Use with caution – if your tool exits with code 78 or other errors, KeepAlive true may cause repeated attempts. It’s often better to let it run on-demand.
+	•	ProcessType: Use "Background" for a headless daemon (no UI) ￼. This is appropriate for most privileged helpers. (“Interactive” is only for agents that might interact with user sessions – not applicable to a root daemon that runs outside any user session.)
+	•	AssociatedBundleIdentifiers: List the main app’s bundle ID here ￼. This is strongly recommended so that the daemon is associated with your app in system UI and for security scopes. E.g.:
+
+<key>AssociatedBundleIdentifiers</key>
+<array>
+    <string>com.mycompany.MyApp</string>
+</array>
+
+
+	•	Do not use keys like SMPrivilegedExecutables or SMAuthorizedClients in these plists; those belong in Info.plist (and as mentioned, should be removed for SMAppService). Also note that for LaunchDaemons, you shouldn’t use LimitLoadToSessionType (that’s for agents).
+
+	3.	Helper Binary Info.plist: The helper executable needs an Info dictionary for launchd (and code signing). Ensure the helper target or build embeds an Info.plist in the binary. In Xcode, set “Create Info.plist Section in Binary” to YES (this automatically uses the target’s Info for the binary) ￼. The Info.plist should at least have:
+	•	CFBundleIdentifier (e.g. com.mycompany.myapp.helper) ￼. This is often the same as the launchd Label (it’s wise to keep them consistent). It doesn’t necessarily need “.xpc” suffix; use whatever identifier you prefer as long as it’s unique and matches your Team ID.
+	•	CFBundleVersion/ShortVersion (if needed).
+	•	MinimumOSVersion if you have one.
+	•	Do not include SMAuthorizedClients in the helper’s Info (remove it if it was there from SMJobBless) ￼. Under SMAppService, the system enforces the client linkage via the AssociatedBundleIdentifiers and code signing, not via this key.
+	•	You also don’t need the helper to be an XPC Bundle (i.e. it doesn’t have to reside in XPCServices or have an extension .xpc – in fact, Bryson’s example specifically advises not to use an XPC service target for a daemon ￼ because XPC services are sandboxed user agents by default). A plain command-line tool target is sufficient.
+	4.	App’s Info.plist and Entitlements: In the main app’s Info, remove any SMPrivilegedExecutables entries (legacy SMJobBless config) ￼. They are not used by SMAppService. You also do not need any specific NSXXX usage descriptions or the like for this (except if your app itself requires other permissions). The main app does not need an entitlement to use SMAppService – but it must not be sandboxed unless you intend to also sandbox the helper (as noted earlier). For Developer ID apps (outside Mac App Store), you’ll typically have no sandbox, so this is fine. If you are sandboxing (for example, distributing via the Mac App Store, which would be unusual for a privileged daemon), you must give the helper an App Sandbox entitlement and likely the temporary exception entitlements for whatever privileged work it needs (since a sandboxed root daemon is very restricted). This scenario is advanced and generally avoided because App Store apps cannot request admin privileges from users, so likely you will only be doing this in non-sandboxed apps.
+	5.	Registration & User Consent: Use the SMAppService API properly:
+	•	Call SMAppService.daemon(plistName: "YourHelper.plist") with the full name including “.plist” ￼ ￼.
+	•	Wrap register() in a do/catch and handle errors. On first run, if the user hasn’t approved background items for your app, register() might throw an error code SMAppServiceErrorDomain Code=1 "Operation not permitted" (meaning the user needs to allow it) ￼. In most cases, though, Apple doesn’t throw an error; instead it registers in a “requires approval” state. You can check service.status. If it equals .requiresApproval, prompt the user to enable it in Settings (or call SMAppService.openSystemSettingsLoginItems() to help them) ￼. Your UI should make it clear that the user needs to take that extra step. If service.status == .enabled immediately, it means it was already approved (perhaps on a previous run).
+	•	Authentication Prompt: On calling register for the first time, macOS will automatically prompt for admin credentials (because installing a LaunchDaemon requires elevation). Ensure your app isn’t doing this in a context that would prevent the prompt (e.g. not while your app is backgrounded). The system dialog will say that your app wants to add a helper and ask for an admin username/password. This is normal – it’s essentially replacing the AuthorizationExecuteWithPrivileges flow from SMJobBless with a system-managed prompt. Once the user enters credentials and approves, the helper should be installed. Subsequent registrations (if the helper was unregistered or updated) might not require credentials again until something changes (e.g. after a reboot or if the user removed it).
+	6.	Post-Registration Verification: After registering, confirm everything:
+	•	Check service.status in code (it should be .enabled if the user immediately approved, or .requiresApproval if waiting) ￼.
+	•	Look at System Settings as described to ensure the toggle is present.
+	•	Use launchctl list to see if the job is listed (it might show with PID or as a placeholder with exit 0 if not yet run) ￼.
+	•	Try initiating an XPC connection. If it times out or fails, gather logs as per debugging tips above.
+	7.	Common Mistake Summary: To recap, the most common mistakes (and their solutions) are:
+	•	Wrong plist key/path: → Use BundleProgram with a correct relative path ￼.
+	•	Forgetting “.plist” in code: → Include the extension in plistName ￼.
+	•	Leftover legacy keys: → Remove SMAuthorizedClients and SMPrivilegedExecutables ￼.
+	•	Files not in bundle or not signed: → Embed plist in app bundle and sign on copy; copy the helper into the bundle and code sign it ￼.
+	•	Mismatched identifiers: → Ensure MachService name, helper’s CFBundleIdentifier, and XPC connection name are aligned (they don’t all have to be identical, but it should be clear what connects to what to avoid typos).
+	•	User not informed to approve: → Handle .requiresApproval and guide the user (or MDM pre-approve if in enterprise).
+	8.	Cleanup and Uninstallation: If your app needs to remove the helper (say on uninstall or upgrade), use SMAppService.daemon(plistName:).unregister() in your code to remove the launchd job. This will disable the daemon and remove it from the Background Items list (though as noted, the UI entry might remain in some macOS versions until the app is deleted or resetbtm is used ￼). If a user simply deletes your app bundle, the daemon’s files go with it, and the system should eventually realize the item is orphaned (macOS may show a warning that a background item was removed). SMAppService is designed to simplify cleanup – no more manual file removal in /Library as with SMJobBless. Still, it’s good practice to call unregister() when appropriate (it requires your app to be running with admin rights, similar to register, so the user will need to authenticate again for removal).
+
+Understanding Launchd Error Codes (EX_CONFIG 78, etc.)
+
+One specific error Konrad observed was the helper exiting with code 78, which corresponds to the constant EX_CONFIG. In launchd context, this means “configuration error”. As one source notes, “78 is mentioned as a standard exit code indicating a configuration error” ￼. In practice, this usually means launchd tried to start the executable but something was misconfigured – common causes:
+	•	The BundleProgram path was wrong (launchd couldn’t find the executable at the given path).
+	•	The executable lacked the proper permissions or signature, so it failed to launch.
+	•	There was a conflict or invalid key in the plist (e.g. using an unsupported key or value that prevents launch).
+	•	The process started and immediately exited with code 78 on its own (less common, since 78 isn’t an arbitrary crash code but rather an intentional exit by the process usually for config issues – most daemons wouldn’t explicitly exit(78) unless they detect bad input).
+
+To diagnose an exit 78:
+	•	Double-check the path in BundleProgram (does the file exist there? Is the path exact?).
+	•	Verify the binary is executable (chmod 755 if needed) ￼.
+	•	Remove or fix any extraneous launchd keys (as discussed, StandardOutPath pointing to an unwritable location was a real-world example that led to 78 ￼).
+	•	Run launchctl print system/YourLabel to see if it logs an error about the job. Also check system logs for a message like “Exited with code 78” around the time of launch.
+
+Another error code you might encounter is 108, which usually means “unable to read configuration plist”. This can happen if the plist isn’t found or isn’t readable (e.g. not code-signed or not in the expected folder). Mixing legacy keys has also caused error 108 in some cases, as Quinn from Apple DTS pointed out (for instance, having SMPrivilegedExecutables could make the ServiceManagement framework think the config is invalid). Ensuring a clean, correct plist as per the guide will avoid this.
+
+If you get a domain error 113 “Could not find the specified service” when calling unregister(), that means the SMAppService framework can’t locate the service by the plist name you gave ￼. This could be due to using the wrong plistName or the service not being registered in the first place. Always use the same plistName for unregister that you used to register, including extension.
+
+Finally, “Couldn’t communicate with a helper application” (the NSXPCConnection error) is essentially the end-result of the daemon not running. It implies that after 30 seconds (the default XPC connection timeout) no reply was received and the connection was invalidated ￼. The solution is to fix the underlying issues preventing the helper from running. Once the helper launches and advertises its MachService, the NSXPCConnection should succeed.
+
+Conclusion
+
+Migrating to SMAppService for privileged helpers brings simplifications (no manual authorization code, auto-cleanup of installed helpers) but also new patterns to follow. By studying working examples like DaemonExample and malpern’s guide, and by adhering to Apple’s updated documentation, you can avoid most pitfalls. Key takeaways include using the BundleProgram key with correct relative paths ￼, bundling everything inside the app, removing deprecated keys, and handling user approval through System Settings. With the above checklist and debugging strategies, you should be able to get a privileged helper tool running on macOS 15+ and diagnose any issues along the way.
+
+Sources & Further Reading:
+	•	Apple Developer Documentation – ServiceManagement: Updating helper executables (explains new bundle requirements) ￼
+	•	Apple Developer Forums – Discussions on SMAppService (Quinn “The Eskimo” provides guidance on common issues like sandboxing and broken registrations) ￼ ￼
+	•	Community Guides: Bryson Tyrrell’s “macOS Apps With Embedded Daemons” ￼ ￼, malpern’s SMAppService Privileged Helper Implementation Guide ￼ ￼, and Csaba Fitzl’s notes on SMAppService behavior ￼. These resources include code snippets and real-world debugging advice.
+
+By following these references and recommendations, you can successfully transition from SMJobBless to SMAppService and have a robust, modern privileged helper that runs as expected on macOS Ventura, Sonoma, Sequoia and beyond.

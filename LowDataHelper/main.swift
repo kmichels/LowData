@@ -64,7 +64,7 @@ extension LowDataHelper: NSXPCListenerDelegate {
 // MARK: - Helper Service Implementation
 class LowDataHelperService: NSObject, LowDataHelperProtocol {
     
-    private let helperVersion = "2.0.0" // Version 2.0 for SMAppService
+    private let helperVersion = "2.0.3" // Version 2.0.3 with debug logging
     private let pfctlPath = "/sbin/pfctl"
     private let rulesFile = "/tmp/lowdata_rules.conf"
     
@@ -75,6 +75,7 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
     
     func applyBlockingRules(_ rules: [[String: Any]], reply: @escaping (Bool, String?) -> Void) {
         NSLog("LowDataHelper: Applying \(rules.count) blocking rules")
+        NSLog("LowDataHelper: Version \(helperVersion) with anchor support")
         
         // Use anchors to avoid affecting main ruleset
         let anchorName = "com.lowdata"
@@ -94,7 +95,13 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
                 if let port = rule["port"] as? Int,
                    let proto = rule["protocol"] as? String {
                     // Block outgoing traffic to this port
-                    pfRules.append("block drop out proto \(proto) from any to any port \(port)")
+                    if proto == "both" {
+                        // Generate separate rules for TCP and UDP
+                        pfRules.append("block drop out proto tcp from any to any port \(port)")
+                        pfRules.append("block drop out proto udp from any to any port \(port)")
+                    } else {
+                        pfRules.append("block drop out proto \(proto) from any to any port \(port)")
+                    }
                 }
                 
             case "portRange":
@@ -102,7 +109,13 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
                    let endPort = rule["endPort"] as? Int,
                    let proto = rule["protocol"] as? String {
                     // Block range of ports
-                    pfRules.append("block drop out proto \(proto) from any to any port \(startPort):\(endPort)")
+                    if proto == "both" {
+                        // Generate separate rules for TCP and UDP
+                        pfRules.append("block drop out proto tcp from any to any port \(startPort):\(endPort)")
+                        pfRules.append("block drop out proto udp from any to any port \(startPort):\(endPort)")
+                    } else {
+                        pfRules.append("block drop out proto \(proto) from any to any port \(startPort):\(endPort)")
+                    }
                 }
                 
             case "service":
@@ -110,7 +123,13 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
                     for portInfo in ports {
                         if let port = portInfo["port"] as? Int,
                            let proto = portInfo["protocol"] as? String {
-                            pfRules.append("block drop out proto \(proto) from any to any port \(port)")
+                            if proto == "both" {
+                                // Generate separate rules for TCP and UDP
+                                pfRules.append("block drop out proto tcp from any to any port \(port)")
+                                pfRules.append("block drop out proto udp from any to any port \(port)")
+                            } else {
+                                pfRules.append("block drop out proto \(proto) from any to any port \(port)")
+                            }
                         }
                     }
                 }
@@ -163,6 +182,7 @@ class LowDataHelperService: NSObject, LowDataHelperProtocol {
             
             // Load rules into our anchor (not the main ruleset)
             // Using -a to specify anchor avoids flushing main rules
+            NSLog("LowDataHelper: Running pfctl with anchor: \(pfctlPath) -a \(anchorName) -f \(rulesFile)")
             let result = runCommand(pfctlPath, arguments: ["-a", anchorName, "-f", rulesFile])
             
             if result.0 == 0 {

@@ -122,12 +122,6 @@ class BlockingRulesManager: ObservableObject {
     // MARK: - Rule Application
     
     func applyRules() {
-        guard isBlockingEnabled else {
-            // If blocking is disabled, remove all rules
-            removeAllActiveRules()
-            return
-        }
-        
         // Check if helper is installed
         guard helperToolManager.isHelperInstalled else {
             print("Helper tool not installed - rules not applied")
@@ -135,8 +129,21 @@ class BlockingRulesManager: ObservableObject {
             return
         }
         
+        guard isBlockingEnabled else {
+            // If blocking is disabled, don't apply rules but keep them saved
+            print("Blocking is disabled - rules saved but not applied to firewall")
+            return
+        }
+        
         // Get enabled rules
         let enabledRules = rules.filter { $0.isEnabled }
+        
+        if enabledRules.isEmpty {
+            // No enabled rules, remove any active firewall rules
+            print("No enabled rules - removing all firewall rules")
+            removeAllActiveRules()
+            return
+        }
         
         print("Applying \(enabledRules.count) blocking rules via helper")
         

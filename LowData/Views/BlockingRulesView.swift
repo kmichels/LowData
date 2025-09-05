@@ -95,9 +95,15 @@ struct BlockingRulesHeader: View {
                 Toggle("Enable Blocking", isOn: $rulesManager.isBlockingEnabled)
                     .toggleStyle(.switch)
                     .disabled(!rulesManager.helperToolManager.isHelperInstalled)
-                    .onChange(of: rulesManager.isBlockingEnabled) { _, _ in
+                    .onChange(of: rulesManager.isBlockingEnabled) { _, newValue in
                         rulesManager.saveEnabledState()
-                        rulesManager.applyRules()
+                        if newValue {
+                            // Enabling blocking - apply saved rules
+                            rulesManager.applyRules()
+                        } else {
+                            // Disabling blocking - remove active firewall rules
+                            rulesManager.removeAllActiveRules()
+                        }
                     }
             }
             .padding()
